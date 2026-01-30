@@ -2,7 +2,9 @@ using System;
 using System.Collections;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Sockets;
 using System.Text;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
@@ -24,6 +26,18 @@ public class OwpBootstrap : MonoBehaviour
     private InputField _chatInput;
     private Text _chatLog;
     private Button _sendButton;
+
+    private GameObject _worldsPanel;
+    private InputField _worldNameInput;
+    private Button _createWorldButton;
+    private Button _refreshWorldsButton;
+    private Transform _worldsListRoot;
+    private Button _hostConnectButton;
+    private Text _selectedWorldLabel;
+
+    private Process _gameProcess;
+    private string _selectedWorldId;
+    private int _selectedWorldPort;
 
     private GameObject _providerPanel;
     private Button _useCodexButton;
@@ -50,6 +64,7 @@ public class OwpBootstrap : MonoBehaviour
     {
         yield return StartCoroutine(EnsureServerRunning());
         yield return StartCoroutine(RefreshAssistantStatus());
+        yield return StartCoroutine(RefreshWorlds());
 
         AppendLog("Companion: Hi. I can help create/edit your avatar and worlds.");
         AppendLog("Companion: Choose Codex or Claude the first time, then describe the avatar you want.");
@@ -277,6 +292,302 @@ public class OwpBootstrap : MonoBehaviour
         }
     }
 
+    private IEnumerator RefreshWorlds()
+    {
+        using (var req = UnityWebRequest.Get($"{AdminBaseUrl}/worlds"))
+        {
+            req.timeout = 10;
+            yield return req.SendWebRequest();
+            if (req.result != UnityWebRequest.Result.Success)
+            {
+                AppendLog("Worlds: failed to load list.");
+                yield break;
+            }
+
+            var wrapped = "{\"items\":" + req.downloadHandler.text + "}";
+            var list = JsonUtility.FromJson<WorldListResponse>(wrapped);
+            if (list == null || list.items == null)
+            {
+                AppendLog("Worlds: list parse failed.");
+                yield break;
+            }
+
+            RenderWorldList(list.items);
+        }
+    }
+
+    private void RenderWorldList(WorldDirectoryEntry[] worlds)
+    {
+        if (_worldsListRoot == null) return;
+
+        for (int i = _worldsListRoot.childCount - 1; i >= 0; i--)
+        {
+            Destroy(_worldsListRoot.GetChild(i).gameObject);
+        }
+
+        float y = 0;
+        foreach (var w in worlds)
+        {
+            if (w == null) continue;
+            var btn = CreateButtonTL(_worldsListRoot, $"World_{w.world_id}", $"{w.name}  ({w.port})", new Vector2(0, y), new Vector2(380, 30));
+            btn.onClick.AddListener(() =>
+            {
+                SelectWorld(w.world_id, w.port, w.name);
+            });
+            y -= 34;
+        }
+
+        if (worlds.Length == 0)
+        {
+            var t = CreateTextTL(_worldsListRoot, "NoWorlds", "No worlds yet. Create one.", new Vector2(0, 0), new Vector2(380, 30));
+            t.alignment = TextAnchor.MiddleLeft;
+        }
+    }
+
+    private void SelectWorld(string worldId, int port, string name)
+    {
+        _selectedWorldId = worldId;
+        _selectedWorldPort = port;
+        if (_selectedWorldLabel != null)
+        {
+            _selectedWorldLabel.text = $"Selected: {name} ({port})";
+        }
+    }
+
+    private IEnumerator CreateWorld(string name)
+    {
+        var json = $"{{\"name\":{JsonEscape(name)},\"game_port\":7777}}";
+        var body = Encoding.UTF8.GetBytes(json);
+
+        using (var req = new UnityWebRequest($"{AdminBaseUrl}/worlds", "POST"))
+        {
+            req.uploadHandler = new UploadHandlerRaw(body);
+            req.downloadHandler = new DownloadHandlerBuffer();
+            req.SetRequestHeader("Content-Type", "application/json");
+            req.timeout = 20;
+            yield return req.SendWebRequest();
+
+            if (req.result != UnityWebRequest.Result.Success)
+            {
+                AppendLog("Worlds: create failed.");
+                yield break;
+            }
+
+            var manifest = JsonUtility.FromJson<WorldManifest>(req.downloadHandler.text);
+            if (manifest == null || string.IsNullOrEmpty(manifest.world_id))
+            {
+                AppendLog("Worlds: create response parse failed.");
+                yield break;
+            }
+
+            AppendLog($"Worlds: created {manifest.name} ({manifest.world_id}).");
+            SelectWorld(manifest.world_id, manifest.ports != null ? manifest.ports.game_port : 7777, manifest.name);
+            yield return StartCoroutine(RefreshWorlds());
+        }
+    }
+
+    private IEnumerator HostAndConnectSelectedWorld()
+    {
+        if (string.IsNullOrEmpty(_selectedWorldId))
+        {
+            AppendLog("Worlds: select a world first.");
+            yield break;
+        }
+
+        EnsureGameServerRunning(_selectedWorldId);
+
+        float deadline = Time.time + 10f;
+        while (Time.time < deadline)
+        {
+            var ok = false;
+            yield return StartCoroutine(CheckTcpPort("127.0.0.1", _selectedWorldPort, (v) => ok = v));
+            if (ok) break;
+            yield return new WaitForSeconds(0.25f);
+        }
+
+        yield return StartCoroutine(ConnectAndHandshake("127.0.0.1", _selectedWorldPort, _selectedWorldId));
+    }
+
+    private void EnsureGameServerRunning(string worldId)
+    {
+        try
+        {
+            if (_gameProcess != null && !_gameProcess.HasExited)
+            {
+                // For now: one world at a time; restart if different.
+                _gameProcess.Kill();
+                _gameProcess = null;
+            }
+
+            var serverPath = ResolveServerPath();
+            if (string.IsNullOrEmpty(serverPath) || !File.Exists(serverPath))
+            {
+                AppendLog("Game: server binary not found.");
+                return;
+            }
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = serverPath,
+                Arguments = $"run --world-id {worldId}",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                WorkingDirectory = ResolveRepoRoot()
+            };
+
+            _gameProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            _gameProcess.OutputDataReceived += (_, e) => { if (!string.IsNullOrEmpty(e.Data)) UnityEngine.Debug.Log(e.Data); };
+            _gameProcess.ErrorDataReceived += (_, e) => { if (!string.IsNullOrEmpty(e.Data)) UnityEngine.Debug.LogWarning(e.Data); };
+
+            _gameProcess.Start();
+            _gameProcess.BeginOutputReadLine();
+            _gameProcess.BeginErrorReadLine();
+
+            AppendLog($"Game: starting world {worldId} on tcp://127.0.0.1:{_selectedWorldPort}…");
+        }
+        catch (Exception ex)
+        {
+            UnityEngine.Debug.LogError(ex);
+            AppendLog("Game: failed to start.");
+        }
+    }
+
+    private IEnumerator CheckTcpPort(string host, int port, Action<bool> cb)
+    {
+        var task = CheckTcpPortAsync(host, port);
+        yield return new WaitUntil(() => task.IsCompleted);
+        cb(task.Status == TaskStatus.RanToCompletion && task.Result);
+    }
+
+    private static async Task<bool> CheckTcpPortAsync(string host, int port)
+    {
+        try
+        {
+            using (var client = new TcpClient())
+            {
+                var t = client.ConnectAsync(host, port);
+                var completed = await Task.WhenAny(t, Task.Delay(500));
+                if (completed != t) return false;
+                await t;
+                return client.Connected;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private IEnumerator ConnectAndHandshake(string host, int port, string worldId)
+    {
+        AppendLog($"Net: connecting to {host}:{port}…");
+
+        var task = ConnectAndHandshakeAsync(host, port, worldId);
+        yield return new WaitUntil(() => task.IsCompleted);
+
+        if (task.Status != TaskStatus.RanToCompletion)
+        {
+            AppendLog("Net: handshake failed (exception).");
+            yield break;
+        }
+
+        if (!task.Result.ok)
+        {
+            AppendLog($"Net: handshake failed ({task.Result.error}).");
+            yield break;
+        }
+
+        AppendLog($"Net: welcome → {task.Result.motd}");
+    }
+
+    private static async Task<HandshakeResult> ConnectAndHandshakeAsync(string host, int port, string worldId)
+    {
+        try
+        {
+            using (var client = new TcpClient())
+            {
+                await client.ConnectAsync(host, port);
+                using (var stream = client.GetStream())
+                {
+                    var hello = new HelloMessage
+                    {
+                        type = "hello",
+                        protocol_version = "0.1",
+                        request_id = Guid.NewGuid().ToString(),
+                        world_id = worldId,
+                        client_name = "owp-unity"
+                    };
+                    var helloJson = JsonUtility.ToJson(hello);
+                    await WriteFrame(stream, helloJson);
+
+                    var msgJson = await ReadFrame(stream);
+                    if (string.IsNullOrEmpty(msgJson))
+                    {
+                        return new HandshakeResult { ok = false, error = "empty response" };
+                    }
+
+                    var env = JsonUtility.FromJson<MessageEnvelope>(msgJson);
+                    if (env == null || string.IsNullOrEmpty(env.type))
+                    {
+                        return new HandshakeResult { ok = false, error = "invalid message envelope" };
+                    }
+
+                    if (env.type != "welcome")
+                    {
+                        return new HandshakeResult { ok = false, error = "unexpected message: " + env.type };
+                    }
+
+                    var welcome = JsonUtility.FromJson<WelcomeMessage>(msgJson);
+                    return new HandshakeResult { ok = true, motd = welcome != null ? welcome.motd : "Welcome" };
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return new HandshakeResult { ok = false, error = ex.Message };
+        }
+    }
+
+    private static async Task WriteFrame(NetworkStream stream, string json)
+    {
+        var payload = Encoding.UTF8.GetBytes(json);
+        var len = payload.Length;
+        var header = new byte[4];
+        header[0] = (byte)((len >> 24) & 0xFF);
+        header[1] = (byte)((len >> 16) & 0xFF);
+        header[2] = (byte)((len >> 8) & 0xFF);
+        header[3] = (byte)(len & 0xFF);
+        await stream.WriteAsync(header, 0, 4);
+        await stream.WriteAsync(payload, 0, payload.Length);
+        await stream.FlushAsync();
+    }
+
+    private static async Task<string> ReadFrame(NetworkStream stream)
+    {
+        var header = await ReadExact(stream, 4);
+        if (header == null || header.Length != 4) return null;
+        var len = (header[0] << 24) | (header[1] << 16) | (header[2] << 8) | header[3];
+        if (len <= 0 || len > 4 * 1024 * 1024) return null;
+        var payload = await ReadExact(stream, len);
+        if (payload == null) return null;
+        return Encoding.UTF8.GetString(payload);
+    }
+
+    private static async Task<byte[]> ReadExact(NetworkStream stream, int n)
+    {
+        var buf = new byte[n];
+        var off = 0;
+        while (off < n)
+        {
+            var read = await stream.ReadAsync(buf, off, n - off);
+            if (read <= 0) return null;
+            off += read;
+        }
+        return buf;
+    }
+
     private void ApplyAvatar(AvatarSpec avatar)
     {
         if (_avatarRoot == null) return;
@@ -428,6 +739,51 @@ public class OwpBootstrap : MonoBehaviour
         _useClaudeButton.onClick.AddListener(() => StartCoroutine(SetProvider("claude")));
 
         _providerPanel.SetActive(false);
+
+        // Worlds panel (top-left)
+        _worldsPanel = new GameObject("WorldsPanel");
+        _worldsPanel.transform.SetParent(canvasGo.transform, false);
+        var wimg = _worldsPanel.AddComponent<Image>();
+        wimg.color = new Color(0, 0, 0, 0.35f);
+        var wrt = _worldsPanel.GetComponent<RectTransform>();
+        wrt.anchorMin = new Vector2(0, 1);
+        wrt.anchorMax = new Vector2(0, 1);
+        wrt.pivot = new Vector2(0, 1);
+        wrt.sizeDelta = new Vector2(420, 280);
+        wrt.anchoredPosition = new Vector2(20, -20);
+
+        var wtitle = CreateTextTL(_worldsPanel.transform, "WorldsTitle", "Worlds", new Vector2(0, 0), new Vector2(400, 30));
+        wtitle.fontSize = 18;
+        wtitle.alignment = TextAnchor.MiddleLeft;
+
+        _refreshWorldsButton = CreateButtonTL(_worldsPanel.transform, "RefreshWorlds", "Refresh", new Vector2(290, 0), new Vector2(110, 28));
+        _refreshWorldsButton.onClick.AddListener(() => StartCoroutine(RefreshWorlds()));
+
+        _worldNameInput = CreateInputTL(_worldsPanel.transform, "WorldName", new Vector2(0, -40), new Vector2(280, 28));
+        _createWorldButton = CreateButtonTL(_worldsPanel.transform, "CreateWorld", "Create", new Vector2(290, -40), new Vector2(110, 28));
+        _createWorldButton.onClick.AddListener(() =>
+        {
+            var n = (_worldNameInput.text ?? "").Trim();
+            if (n.Length == 0) return;
+            _worldNameInput.text = "";
+            StartCoroutine(CreateWorld(n));
+        });
+
+        _selectedWorldLabel = CreateTextTL(_worldsPanel.transform, "SelectedWorld", "Selected: (none)", new Vector2(0, -76), new Vector2(400, 24));
+        _selectedWorldLabel.alignment = TextAnchor.MiddleLeft;
+
+        var listGo = new GameObject("WorldsList");
+        listGo.transform.SetParent(_worldsPanel.transform, false);
+        var lrt = listGo.AddComponent<RectTransform>();
+        lrt.anchorMin = new Vector2(0, 1);
+        lrt.anchorMax = new Vector2(0, 1);
+        lrt.pivot = new Vector2(0, 1);
+        lrt.sizeDelta = new Vector2(400, 140);
+        lrt.anchoredPosition = new Vector2(0, -104);
+        _worldsListRoot = listGo.transform;
+
+        _hostConnectButton = CreateButtonTL(_worldsPanel.transform, "HostConnect", "Host + Connect", new Vector2(0, -250), new Vector2(400, 28));
+        _hostConnectButton.onClick.AddListener(() => StartCoroutine(HostAndConnectSelectedWorld()));
     }
 
     private static Button CreateButton(Transform parent, string name, string label, Vector2 anchoredPos, Vector2 size)
@@ -504,6 +860,80 @@ public class OwpBootstrap : MonoBehaviour
         return input;
     }
 
+    private static Button CreateButtonTL(Transform parent, string name, string label, Vector2 anchoredPos, Vector2 size)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+
+        var img = go.AddComponent<Image>();
+        img.color = new Color(0.15f, 0.2f, 0.25f, 0.9f);
+
+        var rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0, 1);
+        rt.anchorMax = new Vector2(0, 1);
+        rt.pivot = new Vector2(0, 1);
+        rt.sizeDelta = size;
+        rt.anchoredPosition = anchoredPos;
+
+        var btn = go.AddComponent<Button>();
+
+        var text = CreateTextTL(go.transform, $"{name}_Text", label, Vector2.zero, size);
+        text.alignment = TextAnchor.MiddleCenter;
+        text.color = Color.white;
+
+        return btn;
+    }
+
+    private static Text CreateTextTL(Transform parent, string name, string value, Vector2 anchoredPos, Vector2 size)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+
+        var rt = go.AddComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0, 1);
+        rt.anchorMax = new Vector2(0, 1);
+        rt.pivot = new Vector2(0, 1);
+        rt.sizeDelta = size;
+        rt.anchoredPosition = anchoredPos;
+
+        var text = go.AddComponent<Text>();
+        text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        text.text = value;
+        text.fontSize = 14;
+        text.color = new Color(0.85f, 0.9f, 1f, 1f);
+        return text;
+    }
+
+    private static InputField CreateInputTL(Transform parent, string name, Vector2 anchoredPos, Vector2 size)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+
+        var img = go.AddComponent<Image>();
+        img.color = new Color(1f, 1f, 1f, 0.1f);
+
+        var rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0, 1);
+        rt.anchorMax = new Vector2(0, 1);
+        rt.pivot = new Vector2(0, 1);
+        rt.sizeDelta = size;
+        rt.anchoredPosition = anchoredPos;
+
+        var input = go.AddComponent<InputField>();
+        var placeholder = CreateTextTL(go.transform, "Placeholder", "World name…", Vector2.zero, size);
+        placeholder.color = new Color(1f, 1f, 1f, 0.35f);
+        var text = CreateTextTL(go.transform, "Text", "", Vector2.zero, size);
+        text.color = Color.white;
+        text.alignment = TextAnchor.MiddleLeft;
+        text.supportRichText = false;
+
+        input.textComponent = text;
+        input.placeholder = placeholder;
+        input.lineType = InputField.LineType.SingleLine;
+        input.characterLimit = 64;
+        return input;
+    }
+
     private void AppendLog(string line)
     {
         if (_chatLog == null) return;
@@ -517,6 +947,10 @@ public class OwpBootstrap : MonoBehaviour
             if (_serverProcess != null && !_serverProcess.HasExited)
             {
                 _serverProcess.Kill();
+            }
+            if (_gameProcess != null && !_gameProcess.HasExited)
+            {
+                _gameProcess.Kill();
             }
         }
         catch { }
@@ -541,6 +975,77 @@ public class OwpBootstrap : MonoBehaviour
     private class AvatarGenerateResponse
     {
         public AvatarSpec avatar;
+    }
+
+    [Serializable]
+    private class WorldListResponse
+    {
+        public WorldDirectoryEntry[] items;
+    }
+
+    [Serializable]
+    private class WorldDirectoryEntry
+    {
+        public string world_id;
+        public string name;
+        public string endpoint;
+        public int port;
+        public string token_mint;
+        public string dbc_pool;
+        public string world_pubkey;
+        public string last_seen;
+    }
+
+    [Serializable]
+    private class WorldManifest
+    {
+        public string protocol_version;
+        public string world_id;
+        public string name;
+        public string created_at;
+        public string world_authority_pubkey;
+        public WorldPorts ports;
+    }
+
+    [Serializable]
+    private class WorldPorts
+    {
+        public int game_port;
+        public int asset_port;
+    }
+
+    [Serializable]
+    private class MessageEnvelope
+    {
+        public string type;
+    }
+
+    [Serializable]
+    private class HelloMessage
+    {
+        public string type;
+        public string protocol_version;
+        public string request_id;
+        public string world_id;
+        public string client_name;
+    }
+
+    [Serializable]
+    private class WelcomeMessage
+    {
+        public string type;
+        public string protocol_version;
+        public string request_id;
+        public string world_id;
+        public string token_mint;
+        public string motd;
+    }
+
+    private struct HandshakeResult
+    {
+        public bool ok;
+        public string motd;
+        public string error;
     }
 
     [Serializable]

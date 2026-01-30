@@ -27,6 +27,7 @@ The client bootstraps:
 - prompts you to choose Codex/Claude (first run)
 - lets you switch provider via the **Provider** button in the chat panel
 - lets you type a freeform avatar description; it calls `POST /avatar/generate` and applies the returned JSON to a placeholder avatar.
+- lets you create a local world via the **Worlds** panel and run a handshake-only TCP server (`owp-server run`) for basic connectivity testing
 
 ### Server path override
 
