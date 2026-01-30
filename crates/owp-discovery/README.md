@@ -6,5 +6,5 @@ Planned modes:
 - On-chain registry reader (Solana)
 - Optional HTTP registry reader
 
-Status: scaffold only.
-
+Current:
+- Solana on-chain registry reader via JSON-RPC `getProgramAccounts` (see `fetch_worlds_from_rpc`).

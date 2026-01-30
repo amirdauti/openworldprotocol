@@ -1,0 +1,16 @@
+[package]
+name = "owp-registry"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+
+[dependencies]
+borsh.workspace = true
+borsh-derive.workspace = true
+solana-program.workspace = true

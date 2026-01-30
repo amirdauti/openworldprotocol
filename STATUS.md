@@ -22,7 +22,7 @@ Current focus: **Milestone A — Foundations**
 - [~] Listen on configured port(s)
 - [~] Game port TCP listener (handshake-only)
 - [ ] Chunk streaming skeleton
-- [ ] Host-only admin permissions (generation jobs)
+- [~] Host-only admin permissions (generation jobs)
 
 ### Unity client
 - [ ] Home screen + quick-join connect string
@@ -30,19 +30,19 @@ Current focus: **Milestone A — Foundations**
 - [ ] Handshake implementation
 - [ ] Chunk/entity streaming + basic rendering loop
 - [ ] Chat
-- [ ] Spawn local `owp-server` process (one-click host)
-- [ ] Avatar preview + customization scene
-- [ ] AI companion (“orb”) UI + provider selection/settings
+- [x] Spawn local `owp-server` process (one-click host)
+- [~] Avatar preview + customization scene
+- [~] AI companion (“orb”) UI + provider selection/settings
 
 ### Generation (local Claude/Codex)
 - [ ] World workspace layout + manifest format
-- [ ] Claude CLI adapter (cwd-based)
-- [ ] Codex CLI adapter (cwd-based)
+- [~] Claude CLI adapter (cwd-based)
+- [~] Codex CLI adapter (cwd-based)
 - [ ] Job queue + timeouts + output size limits
 
 ### Discovery
-- [ ] On-chain registry program (recommended)
-- [ ] Registry client reader (Unity + Rust)
+- [~] On-chain registry program (recommended)
+- [~] Registry client reader (Unity + Rust)
 - [ ] Optional HTTP registry (self-hostable)
 
 ### Directory (private web app)

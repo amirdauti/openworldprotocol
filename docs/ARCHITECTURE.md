@@ -28,6 +28,10 @@ Two compatible modes:
 1. On-chain registry (Solana-first; recommended)
 2. Optional HTTP registry (self-hostable directory service / static JSON)
 
+On-chain registry code lives in:
+- `programs/owp-registry/` (Solana program)
+- `crates/owp-discovery/` (Rust reader via RPC)
+
 ### Solana token + Meteora DBC + Launchpad (private)
 - Each world can create a token via Meteora DBC pool creation (DBC mints a new token during pool creation).
 - The launchpad implementation (which also serves as the public landing + directory UI) is private and gitignored; the open-source repo ships interface boundaries + mocks.

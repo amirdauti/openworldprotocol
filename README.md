@@ -16,6 +16,7 @@ Project status: early scaffolding. Track progress in `STATUS.md`.
 - `crates/owp-server/` — Rust local world server (OWP World)
   - Simulation + persistence + networking; runs generation jobs (Claude/Codex) inside a world workspace directory
 - `crates/owp-protocol/` — Protocol types + encoding/decoding shared by client/server
+- `programs/owp-registry/` — Solana on-chain registry program (world directory)
 - `crates/owp-discovery/` — Discovery clients (on-chain registry client + optional HTTP registry client)
 - `apps/owp-launchpad-private/` — **PRIVATE** Next.js app for `openworldprotocol.com` (landing + world/token directory; gitignored; see placeholder instructions)
 
@@ -44,6 +45,7 @@ Details: `SECURITY.md`.
 - `docs/PUBLISH_FLOW.md` — host publish flow (draft)
 - `docs/CLIENT_UX.md` — client onboarding + assistant UX (draft)
 - `docs/ASSISTANT_PROVIDERS.md` — Codex/Claude provider selection + execution (draft)
+- `docs/REGISTRY_ONCHAIN.md` — on-chain world registry (draft)
 - `docs/WALLET_SIGNING.md` — wallet signing model + security notes (draft)
 - `CONTRIBUTING.md` — contribution guidelines
 

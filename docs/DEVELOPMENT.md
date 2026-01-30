@@ -20,6 +20,13 @@ This repo is early scaffolding. The goal is a monorepo containing:
 - Run handshake client: `cargo run -p owp-client-cli -- --connect owp://127.0.0.1:7777?world=<world_id>`
 - Run tests: `cargo test`
 
+### Solana (optional)
+
+On-chain discovery is provided by `programs/owp-registry/`.
+
+- Host build: `cargo build -p owp-registry`
+- SBF build (requires Solana toolchain): `cargo build-sbf -p owp-registry`
+
 ### Web
 
 - Install deps: `pnpm install`

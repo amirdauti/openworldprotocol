@@ -1,0 +1,18 @@
+[package]
+name = "owp-discovery"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+borsh.workspace = true
+borsh-derive.workspace = true
+bs58.workspace = true
+owp-protocol = { path = "../owp-protocol" }
+owp-registry = { path = "../../programs/owp-registry", features = ["no-entrypoint"] }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
