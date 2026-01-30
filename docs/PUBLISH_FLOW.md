@@ -15,6 +15,7 @@ This doc describes the first “host publish” flow that connects:
 - Host API: `owp-server admin` (local-only) on `127.0.0.1:9333`
 - Private app proxy routes (server-side):
   - `GET /api/owp/host/worlds`
+  - `GET /api/owp/host/worlds/:worldId/manifest`
   - `POST /api/owp/host/worlds/:worldId/publish-result`
 
 ## Local setup (admin mode)
@@ -35,14 +36,11 @@ This doc describes the first “host publish” flow that connects:
 
 3. Run the private app and visit `/worlds`.
 
-4. After creating a token/pool (wallet-signed), attach it to a world using “Attach token”.
+4. Use “Publish” to open the world-scoped launch flow:
+   - `/worlds` → “Publish” → “Launch token for this world”
+   - After successful creation, the launch UI auto-persists `{mint, pool, signature}` back to the host manifest.
 
 ## Notes
 
 - The host admin API should remain bound to `127.0.0.1` unless you add strong auth + explicit user intent.
-- Longer-term, “Attach token” should be replaced with a guided “Publish” flow that:
-  - reads the world manifest
-  - suggests token name/symbol/metadata
-  - creates the DBC pool via wallet adapter
-  - writes the publish result back to the host
-
+- “Attach token” remains as a manual fallback, but “Publish” is the preferred path.
