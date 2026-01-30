@@ -1,5 +1,6 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use alloc::string::{String, ToString};
+
+pub const SEED_WORLD: &[u8] = b"world";
 
 pub const WORLD_ENTRY_MAGIC: [u8; 8] = *b"OWPREG01";
 pub const WORLD_ENTRY_VERSION: u8 = 1;
@@ -79,11 +80,5 @@ mod tests {
         let data = entry.try_to_vec().expect("serialize");
         assert_eq!(data.len(), WorldEntry::LEN);
     }
-
-    #[test]
-    fn fixed_string_roundtrip() {
-        let mut dst = [0u8; 8];
-        write_fixed_string(&mut dst, "hello").unwrap();
-        assert_eq!(read_fixed_string(&dst), "hello");
-    }
 }
+

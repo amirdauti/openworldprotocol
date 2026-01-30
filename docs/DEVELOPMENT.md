@@ -24,8 +24,8 @@ This repo is early scaffolding. The goal is a monorepo containing:
 
 On-chain discovery is provided by `programs/owp-registry/`.
 
-- Host build: `cargo build -p owp-registry`
-- SBF build (requires Solana toolchain): `cargo build-sbf -p owp-registry`
+- Host build: `cargo build --manifest-path programs/owp-registry/Cargo.toml`
+- SBF build (requires Solana toolchain): `cargo build-sbf --manifest-path programs/owp-registry/Cargo.toml`
 
 ### Web
 

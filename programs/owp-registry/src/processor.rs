@@ -1,4 +1,8 @@
 use borsh::{BorshDeserialize, BorshSerialize};
+use owp_registry_types::{
+    read_fixed_string, write_fixed_string, WorldEntry, WORLD_ENTRY_MAGIC, WORLD_ENTRY_VERSION,
+    SEED_WORLD,
+};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
@@ -13,8 +17,6 @@ use solana_program::{
 use crate::{
     error::RegistryError,
     instruction::{decode, RegistryInstruction, ENDPOINT_MAX_LEN, METADATA_URI_MAX_LEN, NAME_MAX_LEN},
-    state::{read_fixed_string, write_fixed_string, WorldEntry, WORLD_ENTRY_MAGIC, WORLD_ENTRY_VERSION},
-    SEED_WORLD,
 };
 
 pub struct Processor;
@@ -136,13 +138,13 @@ impl Processor {
             bump,
             world_id,
             authority: authority.key.to_bytes(),
-            name: [0u8; crate::state::NAME_LEN],
-            endpoint: [0u8; crate::state::ENDPOINT_LEN],
+            name: [0u8; owp_registry_types::NAME_LEN],
+            endpoint: [0u8; owp_registry_types::ENDPOINT_LEN],
             game_port,
             asset_port: asset_port.unwrap_or(0),
             token_mint: token_mint.unwrap_or([0u8; 32]),
             dbc_pool: dbc_pool.unwrap_or([0u8; 32]),
-            metadata_uri: [0u8; crate::state::METADATA_URI_LEN],
+            metadata_uri: [0u8; owp_registry_types::METADATA_URI_LEN],
             last_update_slot: clock.slot,
         };
 

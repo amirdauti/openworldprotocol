@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use base64::Engine;
 use borsh::BorshDeserialize;
 use owp_protocol::WorldDirectoryEntry;
-use owp_registry::state::{read_fixed_string, WorldEntry};
+use owp_registry_types::{read_fixed_string, WorldEntry};
 use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;

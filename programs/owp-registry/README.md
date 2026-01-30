@@ -23,11 +23,10 @@ Account data is a fixed-size `WorldEntry` (Borsh).
 
 Host build:
 
-- `cargo build -p owp-registry`
+- `cargo build --manifest-path programs/owp-registry/Cargo.toml`
 
 SBF build (requires Solana toolchain):
 
-- `cargo build-sbf -p owp-registry`
+- `cargo build-sbf --manifest-path programs/owp-registry/Cargo.toml`
 
 Program id is configured at deploy time; clients should treat it as configuration.
-

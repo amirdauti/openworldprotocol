@@ -11,7 +11,7 @@ borsh.workspace = true
 borsh-derive.workspace = true
 bs58.workspace = true
 owp-protocol = { path = "../owp-protocol" }
-owp-registry = { path = "../../programs/owp-registry", features = ["no-entrypoint"] }
+owp-registry-types = { path = "../owp-registry-types" }
 reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 serde.workspace = true
 serde_json.workspace = true

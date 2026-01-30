@@ -1,0 +1,10 @@
+[package]
+name = "owp-registry-types"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+borsh.workspace = true
+borsh-derive.workspace = true
+

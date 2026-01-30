@@ -29,6 +29,8 @@ Clients derive the connect string from these fields:
   - `asset_port == 0` means “none”
   - `token_mint` / `dbc_pool` all-zero pubkey bytes mean “none”
 
+Note: the on-chain program is intentionally **not** part of the root Cargo workspace; build it via `--manifest-path`.
+
 ## Write flow (recommended)
 
 Register/update the world in the registry **after** the token launch succeeds.
@@ -49,4 +51,3 @@ Typical flow:
 - The registry provides discovery only. It does **not** solve NAT/port-forwarding.
 - Storing a heartbeat (`last_seen`) on-chain is expensive; prefer updating only on publish/major updates.
 - Program id is configured at deploy time; treat it as a configurable value in clients.
-

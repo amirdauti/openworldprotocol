@@ -11,6 +11,7 @@ crate-type = ["cdylib", "lib"]
 no-entrypoint = []
 
 [dependencies]
-borsh.workspace = true
-borsh-derive.workspace = true
-solana-program.workspace = true
+borsh = "0.10.4"
+borsh-derive = "0.10.4"
+owp-registry-types = { path = "../../crates/owp-registry-types" }
+solana-program = "1.18.24"
