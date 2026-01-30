@@ -27,9 +27,7 @@ Example shape:
 
 ```json
 {
-  "assistant": {
-    "provider": "codex"
-  }
+  "provider": "codex"
 }
 ```
 
@@ -49,6 +47,10 @@ The local server should expose a host-only endpoint to report:
 
 This is used by the Unity client to present “ready / not ready” status.
 
+Current admin API (prototype):
+- `GET /assistant/status` → returns current provider + install checks
+- `POST /assistant/provider` → sets provider (`codex` or `claude`)
+
 ## Execution constraints (stability)
 
 When spawning a provider process:
@@ -62,4 +64,3 @@ When spawning a provider process:
 
 The UI should not force prompt templates or prompt guides.
 Internally the server still writes structured outputs (manifest, chunks, assets), but the user experience remains freeform.
-
