@@ -11,6 +11,8 @@ dist/
 .turbo/
 .next/
 .cache/
+.env.local
+.env.*.local
 
 # Unity (typical)
 apps/owp-unity/[Ll]ibrary/
@@ -23,4 +25,3 @@ apps/owp-unity/[Uu]ser[Ss]ettings/
 
 # Private launchpad (gitignored by design)
 apps/owp-launchpad-private/
-

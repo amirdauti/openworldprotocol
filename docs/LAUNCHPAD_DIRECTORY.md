@@ -27,6 +27,15 @@ Token creation should be triggered as part of the **world creation/publish flow*
 
 Important: even if an LLM is involved in the workflow, **only the host** should be allowed to initiate token creation and sign transactions.
 
+## v0 implementation (local-only host API + wallet adapter)
+
+For the first implementation:
+
+- The host runs `owp-server admin` which exposes a **local-only** admin API on `127.0.0.1:9333`.
+- The private Next.js app (admin mode) talks to that API **server-side** via `/api/owp/host/*` routes.
+- The host connects a wallet in the private app and signs the token/pool creation transactions.
+- After token creation, the private app calls the host API to persist `{mint, pool, signatures}` into the world manifest.
+
 ## Integration boundary (open-source vs private)
 
 Open-source should define a narrow interface (Rust trait or local HTTP API) that looks like:
@@ -42,4 +51,3 @@ To implement this cleanly, decide:
 - Where does the “publish” action live? (Unity client? CLI? server admin UI?)
 - How does the host sign? (wallet adapter in private Next.js app vs local keypair vs hardware wallet)
 - Is token creation required for every world, or opt-in per world? (devnet-first vs mainnet opt-in)
-

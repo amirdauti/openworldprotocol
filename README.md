@@ -41,6 +41,7 @@ Details: `SECURITY.md`.
 - `docs/ARCHITECTURE.md` — system architecture overview
 - `docs/protocol/v0.1.md` — protocol spec (draft)
 - `docs/LAUNCHPAD_DIRECTORY.md` — directory + token-launch integration boundary (draft)
+- `docs/PUBLISH_FLOW.md` — host publish flow (draft)
 - `CONTRIBUTING.md` — contribution guidelines
 
 ## Private launchpad boundary
