@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 mod storage;
+mod tcp_game;
 mod web_admin;
 
 #[derive(Debug, Parser)]
@@ -39,6 +40,17 @@ enum Command {
         #[arg(long, default_value_t = false)]
         no_auth: bool,
     },
+
+    /// Run the game server TCP listener (handshake only, for now)
+    Run {
+        /// World id to serve
+        #[arg(long)]
+        world_id: String,
+
+        /// Override listen address (defaults to 0.0.0.0:<world game_port>)
+        #[arg(long)]
+        listen: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -74,6 +86,11 @@ async fn main() -> Result<()> {
             };
 
             web_admin::serve(listen, store, auth).await
+        }
+        Command::Run { world_id, listen } => {
+            let store = storage::WorldStore::new()?;
+            let world_id = uuid::Uuid::parse_str(&world_id).context("invalid --world-id")?;
+            tcp_game::serve(store, world_id, listen).await
         }
     }
 }

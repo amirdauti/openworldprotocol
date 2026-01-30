@@ -17,6 +17,7 @@ This repo is early scaffolding. The goal is a monorepo containing:
 
 - Build server: `cargo build -p owp-server`
 - Run server: `cargo run -p owp-server -- ...`
+- Run handshake client: `cargo run -p owp-client-cli -- --connect owp://127.0.0.1:7777?world=<world_id>`
 - Run tests: `cargo test`
 
 ### Web

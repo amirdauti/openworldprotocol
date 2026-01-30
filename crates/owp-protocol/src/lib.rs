@@ -4,6 +4,8 @@ use uuid::Uuid;
 
 pub const OWP_PROTOCOL_VERSION: &str = "0.1";
 
+pub mod wire;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldTokenInfo {
     pub network: String,
@@ -41,4 +43,34 @@ pub struct WorldDirectoryEntry {
     pub world_pubkey: Option<String>,
     #[serde(default)]
     pub last_seen: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Message {
+    Hello(Hello),
+    Welcome(Welcome),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Hello {
+    pub protocol_version: String,
+    pub request_id: Uuid,
+    #[serde(default)]
+    pub world_id: Option<Uuid>,
+    #[serde(default)]
+    pub client_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Welcome {
+    pub protocol_version: String,
+    pub request_id: Uuid,
+    pub world_id: Uuid,
+    #[serde(default)]
+    pub token_mint: Option<String>,
+    #[serde(default)]
+    pub motd: Option<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }

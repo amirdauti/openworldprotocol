@@ -13,12 +13,14 @@ Current focus: **Milestone A — Foundations**
 - [ ] Protocol spec v0.1 (handshake + core messages)
 - [~] Rust `owp-protocol` crate (manifest + directory types scaffolded)
 - [ ] Compatibility tests across versions
+- [~] Handshake message framing + HELLO/WELCOME
 
 ### Rust world server
 - [ ] Server CLI: create world / run server / config
 - [~] Host admin API (local-only) for listing worlds + attaching token info
 - [ ] Persistence layout under `~/.owp/worlds/<world_id>/`
-- [ ] Listen on configured port(s)
+- [~] Listen on configured port(s)
+- [~] Game port TCP listener (handshake-only)
 - [ ] Chunk streaming skeleton
 - [ ] Host-only admin permissions (generation jobs)
 
@@ -28,6 +30,9 @@ Current focus: **Milestone A — Foundations**
 - [ ] Handshake implementation
 - [ ] Chunk/entity streaming + basic rendering loop
 - [ ] Chat
+- [ ] Spawn local `owp-server` process (one-click host)
+- [ ] Avatar preview + customization scene
+- [ ] AI companion (“orb”) UI + provider selection/settings
 
 ### Generation (local Claude/Codex)
 - [ ] World workspace layout + manifest format

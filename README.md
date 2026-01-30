@@ -42,6 +42,9 @@ Details: `SECURITY.md`.
 - `docs/protocol/v0.1.md` — protocol spec (draft)
 - `docs/LAUNCHPAD_DIRECTORY.md` — directory + token-launch integration boundary (draft)
 - `docs/PUBLISH_FLOW.md` — host publish flow (draft)
+- `docs/CLIENT_UX.md` — client onboarding + assistant UX (draft)
+- `docs/ASSISTANT_PROVIDERS.md` — Codex/Claude provider selection + execution (draft)
+- `docs/WALLET_SIGNING.md` — wallet signing model + security notes (draft)
 - `CONTRIBUTING.md` — contribution guidelines
 
 ## Private launchpad boundary

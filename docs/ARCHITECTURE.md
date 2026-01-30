@@ -9,12 +9,15 @@ OWP is an open protocol + reference implementation for a “multiverse” of use
 - Connect to a world by address
 - Stream world chunks/entities
 - Basic gameplay loop + currency UI hooks
+- On startup, can launch the local Rust world server process for “one-click host”
+- In-client AI companion UI for host-only creation/editing (Codex/Claude local CLIs)
 
 ### Rust world server (OWP World)
 - Runs locally on the host PC
 - Owns simulation + persistence + networking
 - Hosts world assets/chunks
 - Runs generation jobs by spawning Claude CLI / Codex CLI inside a world working directory
+- Exposes a local-only admin API for host actions (world creation/publish/token attachment)
 
 ### OWP protocol + SDK
 - Versioned protocol spec (handshake, messages, assets, chunk streaming)
