@@ -19,6 +19,8 @@ public class OwpBootstrap : MonoBehaviour
     private Canvas _canvas;
     private Button _orbButton;
     private GameObject _chatPanel;
+    private Button _providerButton;
+    private Text _providerButtonLabel;
     private InputField _chatInput;
     private Text _chatLog;
     private Button _sendButton;
@@ -154,7 +156,7 @@ public class OwpBootstrap : MonoBehaviour
         return Path.Combine(root, "target", "debug", exe);
     }
 
-    private IEnumerator RefreshAssistantStatus()
+    private IEnumerator RefreshAssistantStatus(bool forceShowProviderPanel = false)
     {
         using (var req = UnityWebRequest.Get($"{AdminBaseUrl}/assistant/status"))
         {
@@ -173,7 +175,10 @@ public class OwpBootstrap : MonoBehaviour
                 yield break;
             }
 
-            if (string.IsNullOrEmpty(status.provider))
+            var provider = status.provider ?? "";
+            SetProviderButtonLabel(provider);
+
+            if (string.IsNullOrEmpty(provider) || forceShowProviderPanel)
             {
                 _providerPanel.SetActive(true);
                 UpdateProviderButtons(status);
@@ -182,7 +187,7 @@ public class OwpBootstrap : MonoBehaviour
             else
             {
                 _providerPanel.SetActive(false);
-                AppendLog($"Assistant: provider set to {status.provider}.");
+                AppendLog($"Assistant: provider set to {provider}.");
             }
         }
     }
@@ -224,6 +229,20 @@ public class OwpBootstrap : MonoBehaviour
 
             AppendLog($"Assistant: provider selected: {provider}.");
             _providerPanel.SetActive(false);
+            yield return StartCoroutine(RefreshAssistantStatus());
+        }
+    }
+
+    private void SetProviderButtonLabel(string provider)
+    {
+        if (_providerButtonLabel == null) return;
+        if (string.IsNullOrEmpty(provider))
+        {
+            _providerButtonLabel.text = "Provider: (select)";
+        }
+        else
+        {
+            _providerButtonLabel.text = $"Provider: {provider}";
         }
     }
 
@@ -364,12 +383,19 @@ public class OwpBootstrap : MonoBehaviour
         rt.anchoredPosition = new Vector2(-20, -20);
         _chatPanel.SetActive(false);
 
-        _chatLog = CreateText(_chatPanel.transform, "ChatLog", "", new Vector2(-10, -10), new Vector2(400, 180));
+        _providerButton = CreateButton(_chatPanel.transform, "ProviderButton", "Provider: (loading…)", new Vector2(-10, -10), new Vector2(180, 24));
+        _providerButtonLabel = _providerButton.GetComponentInChildren<Text>();
+        _providerButton.onClick.AddListener(() =>
+        {
+            StartCoroutine(RefreshAssistantStatus(true));
+        });
+
+        _chatLog = CreateText(_chatPanel.transform, "ChatLog", "", new Vector2(-10, -40), new Vector2(400, 170));
         _chatLog.alignment = TextAnchor.UpperLeft;
         _chatLog.supportRichText = true;
 
-        _chatInput = CreateInput(_chatPanel.transform, "ChatInput", new Vector2(-10, 50), new Vector2(300, 32));
-        _sendButton = CreateButton(_chatPanel.transform, "SendButton", "Send", new Vector2(-10, 50), new Vector2(80, 32));
+        _chatInput = CreateInput(_chatPanel.transform, "ChatInput", new Vector2(-110, -230), new Vector2(300, 32));
+        _sendButton = CreateButton(_chatPanel.transform, "SendButton", "Send", new Vector2(-10, -230), new Vector2(80, 32));
         _sendButton.onClick.AddListener(() =>
         {
             var text = _chatInput.text ?? "";
@@ -391,12 +417,12 @@ public class OwpBootstrap : MonoBehaviour
         prt.sizeDelta = new Vector2(420, 160);
         prt.anchoredPosition = Vector2.zero;
 
-        var title = CreateText(_providerPanel.transform, "ProviderTitle", "Choose provider", new Vector2(0, -20), new Vector2(400, 40));
+        var title = CreateText(_providerPanel.transform, "ProviderTitle", "Choose provider", new Vector2(-10, -20), new Vector2(400, 40));
         title.alignment = TextAnchor.MiddleCenter;
         title.fontSize = 20;
 
-        _useCodexButton = CreateButton(_providerPanel.transform, "UseCodex", "Use Codex", new Vector2(-110, 40), new Vector2(180, 44));
-        _useClaudeButton = CreateButton(_providerPanel.transform, "UseClaude", "Use Claude", new Vector2(110, 40), new Vector2(180, 44));
+        _useCodexButton = CreateButton(_providerPanel.transform, "UseCodex", "Use Codex", new Vector2(-220, -80), new Vector2(180, 44));
+        _useClaudeButton = CreateButton(_providerPanel.transform, "UseClaude", "Use Claude", new Vector2(-20, -80), new Vector2(180, 44));
 
         _useCodexButton.onClick.AddListener(() => StartCoroutine(SetProvider("codex")));
         _useClaudeButton.onClick.AddListener(() => StartCoroutine(SetProvider("claude")));
@@ -528,4 +554,3 @@ public class OwpBootstrap : MonoBehaviour
         public string[] tags;
     }
 }
-

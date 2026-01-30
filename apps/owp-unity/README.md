@@ -25,6 +25,7 @@ Status: scaffold only.
 The client bootstraps:
 - spawns `owp-server admin --listen 127.0.0.1:9333 --no-auth` from `../../target/debug/owp-server`
 - prompts you to choose Codex/Claude (first run)
+- lets you switch provider via the **Provider** button in the chat panel
 - lets you type a freeform avatar description; it calls `POST /avatar/generate` and applies the returned JSON to a placeholder avatar.
 
 ### Server path override
