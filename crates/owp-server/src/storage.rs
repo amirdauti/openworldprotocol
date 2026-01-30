@@ -26,6 +26,18 @@ impl WorldStore {
         self.root.join("worlds")
     }
 
+    pub fn root_dir(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn config_path(&self) -> PathBuf {
+        self.root.join("config.json")
+    }
+
+    pub fn profiles_root(&self) -> PathBuf {
+        self.root.join("profiles")
+    }
+
     pub fn admin_token_path(&self) -> PathBuf {
         self.root.join("admin-token")
     }

@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
+mod assistant;
+mod avatar;
 mod storage;
 mod tcp_game;
 mod web_admin;

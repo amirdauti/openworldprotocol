@@ -46,6 +46,21 @@ pub struct WorldDirectoryEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvatarSpecV1 {
+    pub version: String,
+    pub name: String,
+    /// Hex color string like "#RRGGBB"
+    pub primary_color: String,
+    /// Hex color string like "#RRGGBB"
+    pub secondary_color: String,
+    /// Height multiplier for the placeholder avatar (0.5 - 2.0)
+    pub height: f32,
+    /// Freeform tags like "athletic", "cyberpunk", etc.
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
     Hello(Hello),

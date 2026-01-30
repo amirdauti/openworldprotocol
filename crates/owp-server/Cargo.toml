@@ -13,6 +13,7 @@ owp-protocol = { path = "../owp-protocol" }
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 time.workspace = true
 tokio.workspace = true
 tower.workspace = true

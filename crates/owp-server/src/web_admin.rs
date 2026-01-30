@@ -5,13 +5,15 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use owp_protocol::{WorldDirectoryEntry, WorldManifestV1};
+use owp_protocol::{AvatarSpecV1, WorldDirectoryEntry, WorldManifestV1};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
+use crate::assistant::{self, AssistantProviderId};
+use crate::avatar as avatar_mod;
 use crate::storage::WorldStore;
 
 #[derive(Clone)]
@@ -165,6 +167,92 @@ async fn publish_result(
     Ok(Json(manifest))
 }
 
+async fn assistant_status(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<assistant::AssistantStatus>, StatusCode> {
+    require_auth(&headers, &st.auth)?;
+    let status = assistant::status(&st.store)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(status))
+}
+
+#[derive(Debug, Deserialize)]
+struct SetProviderRequest {
+    provider: String,
+}
+
+async fn set_provider(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<SetProviderRequest>,
+) -> Result<StatusCode, StatusCode> {
+    require_auth(&headers, &st.auth)?;
+
+    let provider = match req.provider.as_str() {
+        "codex" => AssistantProviderId::Codex,
+        "claude" => AssistantProviderId::Claude,
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    let mut cfg =
+        assistant::load_config(&st.store).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    cfg.provider = Some(provider);
+    assistant::save_config(&st.store, &cfg).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+struct AvatarGenerateRequest {
+    prompt: String,
+    #[serde(default)]
+    profile_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AvatarGenerateResponse {
+    avatar: AvatarSpecV1,
+}
+
+async fn get_avatar(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Option<AvatarSpecV1>>, StatusCode> {
+    require_auth(&headers, &st.auth)?;
+    let avatar = avatar_mod::load_avatar(&st.store, "local")
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(avatar))
+}
+
+async fn generate_avatar(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<AvatarGenerateRequest>,
+) -> Result<Json<AvatarGenerateResponse>, StatusCode> {
+    require_auth(&headers, &st.auth)?;
+
+    let cfg = assistant::load_config(&st.store).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let Some(provider) = cfg.provider else {
+        return Err(StatusCode::PRECONDITION_FAILED);
+    };
+
+    let avatar = avatar_mod::generate_avatar(&st.store, provider, &req.prompt)
+        .await
+        .map_err(|e| {
+            error!("avatar generation failed: {e:#}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let profile_id = req.profile_id.as_deref().unwrap_or("local");
+    avatar_mod::save_avatar(&st.store, profile_id, &avatar).map_err(|e| {
+        error!("saving avatar failed: {e:#}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(AvatarGenerateResponse { avatar }))
+}
+
 pub async fn serve(listen: String, store: WorldStore, auth: AuthMode) -> Result<()> {
     let addr: SocketAddr = listen.parse().context("parse listen addr")?;
 
@@ -175,6 +263,10 @@ pub async fn serve(listen: String, store: WorldStore, auth: AuthMode) -> Result<
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/assistant/status", get(assistant_status))
+        .route("/assistant/provider", post(set_provider))
+        .route("/avatar", get(get_avatar))
+        .route("/avatar/generate", post(generate_avatar))
         .route("/worlds", get(list_worlds).post(create_world))
         .route("/worlds/:world_id/manifest", get(get_manifest))
         .route("/worlds/:world_id/publish-result", post(publish_result))
