@@ -1,0 +1,26 @@
+# OS
+.DS_Store
+
+# Rust
+target/
+**/*.rs.bk
+
+# Node / JS
+node_modules/
+dist/
+.turbo/
+.next/
+.cache/
+
+# Unity (typical)
+apps/owp-unity/[Ll]ibrary/
+apps/owp-unity/[Tt]emp/
+apps/owp-unity/[Oo]bj/
+apps/owp-unity/[Bb]uild/
+apps/owp-unity/[Bb]uilds/
+apps/owp-unity/[Ll]ogs/
+apps/owp-unity/[Uu]ser[Ss]ettings/
+
+# Private launchpad (gitignored by design)
+apps/owp-launchpad-private/
+
