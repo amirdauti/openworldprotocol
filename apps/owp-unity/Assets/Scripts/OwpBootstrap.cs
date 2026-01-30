@@ -31,9 +31,12 @@ public class OwpBootstrap : MonoBehaviour
     private InputField _worldNameInput;
     private Button _createWorldButton;
     private Button _refreshWorldsButton;
+    private Button _worldsSourceButton;
+    private Text _worldsSourceLabel;
     private Transform _worldsListRoot;
     private Button _hostConnectButton;
     private Text _selectedWorldLabel;
+    private bool _worldsUseOnChain;
 
     private Process _gameProcess;
     private string _selectedWorldId;
@@ -294,13 +297,21 @@ public class OwpBootstrap : MonoBehaviour
 
     private IEnumerator RefreshWorlds()
     {
-        using (var req = UnityWebRequest.Get($"{AdminBaseUrl}/worlds"))
+        var path = _worldsUseOnChain ? "/discovery/worlds" : "/worlds";
+        using (var req = UnityWebRequest.Get($"{AdminBaseUrl}{path}"))
         {
             req.timeout = 10;
             yield return req.SendWebRequest();
             if (req.result != UnityWebRequest.Result.Success)
             {
-                AppendLog("Worlds: failed to load list.");
+                if (_worldsUseOnChain && req.responseCode == 412)
+                {
+                    AppendLog("Worlds: on-chain discovery not configured (missing RPC URL or program id).");
+                }
+                else
+                {
+                    AppendLog("Worlds: failed to load list.");
+                }
                 yield break;
             }
 
@@ -756,6 +767,14 @@ public class OwpBootstrap : MonoBehaviour
         wtitle.fontSize = 18;
         wtitle.alignment = TextAnchor.MiddleLeft;
 
+        _worldsSourceButton = CreateButtonTL(_worldsPanel.transform, "WorldsSource", "Source: Local", new Vector2(140, 0), new Vector2(140, 28));
+        _worldsSourceLabel = _worldsSourceButton.GetComponentInChildren<Text>();
+        _worldsSourceButton.onClick.AddListener(() =>
+        {
+            SetWorldsSource(!_worldsUseOnChain);
+            StartCoroutine(RefreshWorlds());
+        });
+
         _refreshWorldsButton = CreateButtonTL(_worldsPanel.transform, "RefreshWorlds", "Refresh", new Vector2(290, 0), new Vector2(110, 28));
         _refreshWorldsButton.onClick.AddListener(() => StartCoroutine(RefreshWorlds()));
 
@@ -784,6 +803,21 @@ public class OwpBootstrap : MonoBehaviour
 
         _hostConnectButton = CreateButtonTL(_worldsPanel.transform, "HostConnect", "Host + Connect", new Vector2(0, -250), new Vector2(400, 28));
         _hostConnectButton.onClick.AddListener(() => StartCoroutine(HostAndConnectSelectedWorld()));
+
+        SetWorldsSource(false);
+    }
+
+    private void SetWorldsSource(bool onChain)
+    {
+        _worldsUseOnChain = onChain;
+        if (_worldsSourceLabel != null)
+        {
+            _worldsSourceLabel.text = _worldsUseOnChain ? "Source: On-chain" : "Source: Local";
+        }
+
+        // On-chain mode is read-only (directory); local mode can create worlds.
+        if (_worldNameInput != null) _worldNameInput.interactable = !_worldsUseOnChain;
+        if (_createWorldButton != null) _createWorldButton.interactable = !_worldsUseOnChain;
     }
 
     private static Button CreateButton(Transform parent, string name, string label, Vector2 anchoredPos, Vector2 size)

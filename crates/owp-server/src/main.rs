@@ -41,6 +41,16 @@ enum Command {
         /// Disable auth entirely (not recommended).
         #[arg(long, default_value_t = false)]
         no_auth: bool,
+
+        /// Optional Solana RPC URL for reading the on-chain registry (used by admin discovery endpoints).
+        /// Can also be provided via `OWP_SOLANA_RPC_URL`.
+        #[arg(long)]
+        solana_rpc_url: Option<String>,
+
+        /// Optional Solana program id for the on-chain registry (used by admin discovery endpoints).
+        /// Can also be provided via `OWP_REGISTRY_PROGRAM_ID`.
+        #[arg(long)]
+        registry_program_id: Option<String>,
     },
 
     /// Run the game server TCP listener (handshake only, for now)
@@ -73,6 +83,8 @@ async fn main() -> Result<()> {
             listen,
             token,
             no_auth,
+            solana_rpc_url,
+            registry_program_id,
         } => {
             let store = storage::WorldStore::new()?;
             let auth = if no_auth {
@@ -87,7 +99,23 @@ async fn main() -> Result<()> {
                 web_admin::AuthMode::BearerToken(token)
             };
 
-            web_admin::serve(listen, store, auth).await
+            let solana_rpc_url = solana_rpc_url
+                .or_else(|| std::env::var("OWP_SOLANA_RPC_URL").ok())
+                .filter(|v| !v.trim().is_empty());
+            let registry_program_id = registry_program_id
+                .or_else(|| std::env::var("OWP_REGISTRY_PROGRAM_ID").ok())
+                .filter(|v| !v.trim().is_empty());
+
+            web_admin::serve(
+                listen,
+                store,
+                auth,
+                web_admin::DiscoveryConfig {
+                    solana_rpc_url,
+                    registry_program_id,
+                },
+            )
+            .await
         }
         Command::Run { world_id, listen } => {
             let store = storage::WorldStore::new()?;

@@ -5,6 +5,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use owp_discovery;
 use owp_protocol::{AvatarSpecV1, WorldDirectoryEntry, WorldManifestV1};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -26,6 +27,7 @@ pub enum AuthMode {
 struct AppState {
     store: WorldStore,
     auth: AuthMode,
+    discovery: DiscoveryConfig,
 }
 
 fn require_auth(headers: &HeaderMap, auth: &AuthMode) -> Result<(), StatusCode> {
@@ -47,6 +49,12 @@ fn require_auth(headers: &HeaderMap, auth: &AuthMode) -> Result<(), StatusCode> 
             Ok(())
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct DiscoveryConfig {
+    pub solana_rpc_url: Option<String>,
+    pub registry_program_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -253,7 +261,12 @@ async fn generate_avatar(
     Ok(Json(AvatarGenerateResponse { avatar }))
 }
 
-pub async fn serve(listen: String, store: WorldStore, auth: AuthMode) -> Result<()> {
+pub async fn serve(
+    listen: String,
+    store: WorldStore,
+    auth: AuthMode,
+    discovery: DiscoveryConfig,
+) -> Result<()> {
     let addr: SocketAddr = listen.parse().context("parse listen addr")?;
 
     let cors = CorsLayer::new()
@@ -268,12 +281,40 @@ pub async fn serve(listen: String, store: WorldStore, auth: AuthMode) -> Result<
         .route("/avatar", get(get_avatar))
         .route("/avatar/generate", post(generate_avatar))
         .route("/worlds", get(list_worlds).post(create_world))
+        .route("/discovery/worlds", get(discovery_worlds))
         .route("/worlds/:world_id/manifest", get(get_manifest))
         .route("/worlds/:world_id/publish-result", post(publish_result))
-        .with_state(AppState { store, auth })
+        .with_state(AppState {
+            store,
+            auth,
+            discovery,
+        })
         .layer(cors);
 
     info!("OWP admin API listening on http://{addr}");
     axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
     Ok(())
+}
+
+async fn discovery_worlds(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<WorldDirectoryEntry>>, StatusCode> {
+    require_auth(&headers, &st.auth)?;
+
+    let Some(rpc_url) = st.discovery.solana_rpc_url.as_deref() else {
+        return Err(StatusCode::PRECONDITION_FAILED);
+    };
+    let Some(program_id) = st.discovery.registry_program_id.as_deref() else {
+        return Err(StatusCode::PRECONDITION_FAILED);
+    };
+
+    let worlds = owp_discovery::fetch_worlds_from_rpc(rpc_url, program_id)
+        .await
+        .map_err(|e| {
+            error!("discovery fetch failed: {e:#}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(worlds))
 }

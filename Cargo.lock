@@ -871,6 +871,7 @@ dependencies = [
  "axum",
  "clap",
  "directories",
+ "owp-discovery",
  "owp-protocol",
  "rand 0.8.5",
  "serde",
