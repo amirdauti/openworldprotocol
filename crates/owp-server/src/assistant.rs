@@ -346,7 +346,7 @@ fn companion_schema_json() -> String {
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["id","attach","primitive","position","rotation","scale","color"],
+	                "required": ["id","attach","primitive","position","rotation","scale","color","emission_color","emission_strength"],
                 "properties": {
                   "id": { "type": "string", "minLength": 1, "maxLength": 64 },
                   "attach": { "type": "string", "enum": ["body","head"] },
