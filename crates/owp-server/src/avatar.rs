@@ -202,7 +202,7 @@ fn extract_json_object(text: &str) -> Result<String> {
     anyhow::bail!("unterminated json object");
 }
 
-fn normalize_avatar(a: &mut AvatarSpecV1) {
+pub(crate) fn normalize_avatar(a: &mut AvatarSpecV1) {
     if a.primary_color.is_empty() {
         a.primary_color = "#00D1FF".to_string();
     }

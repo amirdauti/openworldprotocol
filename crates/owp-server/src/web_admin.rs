@@ -212,6 +212,46 @@ async fn set_provider(
 }
 
 #[derive(Debug, Deserialize)]
+struct AssistantChatRequest {
+    message: String,
+    #[serde(default)]
+    profile_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AssistantChatResponse {
+    reply: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    avatar: Option<AvatarSpecV1>,
+}
+
+async fn assistant_chat(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<AssistantChatRequest>,
+) -> Result<Json<AssistantChatResponse>, StatusCode> {
+    require_auth(&headers, &st.auth)?;
+
+    let cfg = assistant::load_config(&st.store).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let Some(provider) = cfg.provider else {
+        return Err(StatusCode::PRECONDITION_FAILED);
+    };
+
+    let profile_id = req.profile_id.as_deref().unwrap_or("local");
+    let out = assistant::companion_chat(&st.store, provider, profile_id, &req.message)
+        .await
+        .map_err(|e| {
+            error!("assistant chat failed: {e:#}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(AssistantChatResponse {
+        reply: out.reply,
+        avatar: out.avatar,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
 struct AvatarGenerateRequest {
     prompt: String,
     #[serde(default)]
@@ -278,6 +318,7 @@ pub async fn serve(
         .route("/health", get(health))
         .route("/assistant/status", get(assistant_status))
         .route("/assistant/provider", post(set_provider))
+        .route("/assistant/chat", post(assistant_chat))
         .route("/avatar", get(get_avatar))
         .route("/avatar/generate", post(generate_avatar))
         .route("/worlds", get(list_worlds).post(create_world))

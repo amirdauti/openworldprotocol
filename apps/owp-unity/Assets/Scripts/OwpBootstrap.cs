@@ -310,7 +310,8 @@ public class OwpBootstrap : MonoBehaviour
 
     private IEnumerator GenerateAvatar(string prompt)
     {
-        var json = $"{{\"prompt\":{JsonEscape(prompt)}}}";
+        // Back-compat: keep old endpoint available, but the primary UX is /assistant/chat via SendChat.
+        var json = $"{{\"prompt\":{JsonEscape(prompt)},\"profile_id\":\"local\"}}";
         var task = HttpRequestAsync("POST", $"{AdminBaseUrl}/avatar/generate", json, 120);
         yield return new WaitUntil(() => task.IsCompleted);
 
@@ -335,6 +336,50 @@ public class OwpBootstrap : MonoBehaviour
 
         ApplyAvatar(resp.avatar);
         AppendLog($"Assistant: avatar updated → {resp.avatar.name}");
+    }
+
+    private IEnumerator SendChat(string message)
+    {
+        var json = $"{{\"message\":{JsonEscape(message)},\"profile_id\":\"local\"}}";
+        var task = HttpRequestAsync("POST", $"{AdminBaseUrl}/assistant/chat", json, 120);
+        yield return new WaitUntil(() => task.IsCompleted);
+
+        if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok)
+        {
+            var status = task.Status == TaskStatus.RanToCompletion ? task.Result.status : 0;
+            if (status == 412)
+            {
+                AppendLog("Assistant: choose Codex or Claude first.");
+                _providerPanel.SetActive(true);
+                yield break;
+            }
+
+            var detail = task.Status == TaskStatus.RanToCompletion ? (task.Result.text ?? "") : (task.Exception?.GetBaseException().Message ?? "");
+            detail = (detail ?? "").Trim();
+            if (detail.Length > 180) detail = detail.Substring(0, 180) + "…";
+            AppendLog(detail.Length == 0
+                ? $"Assistant: chat failed ({status})."
+                : $"Assistant: chat failed ({status}) → {detail}");
+            yield break;
+        }
+
+        var resp = JsonUtility.FromJson<AssistantChatResponse>(task.Result.text);
+        if (resp == null)
+        {
+            AppendLog("Assistant: chat response parse failed.");
+            yield break;
+        }
+
+        if (!string.IsNullOrEmpty(resp.reply))
+        {
+            AppendLog($"Companion: {resp.reply}");
+        }
+
+        if (resp.avatar != null)
+        {
+            ApplyAvatar(resp.avatar);
+            AppendLog($"Avatar: updated → {resp.avatar.name}");
+        }
     }
 
     private IEnumerator RefreshWorlds()
@@ -878,7 +923,7 @@ public class OwpBootstrap : MonoBehaviour
             if (text.Trim().Length == 0) return;
             _chatInput.text = "";
             AppendLog($"You: {text}");
-            StartCoroutine(GenerateAvatar(text));
+            StartCoroutine(SendChat(text));
         });
 
         // Orb toggle (top-right)
@@ -1346,11 +1391,18 @@ public class OwpBootstrap : MonoBehaviour
         public string note;
     }
 
-    [Serializable]
-    private class AvatarGenerateResponse
-    {
-        public AvatarSpec avatar;
-    }
+	    [Serializable]
+	    private class AssistantChatResponse
+	    {
+	        public string reply;
+	        public AvatarSpec avatar;
+	    }
+
+	    [Serializable]
+	    private class AvatarGenerateResponse
+	    {
+	        public AvatarSpec avatar;
+	    }
 
     [Serializable]
     private class WorldListResponse
