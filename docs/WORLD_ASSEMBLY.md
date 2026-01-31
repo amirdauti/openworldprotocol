@@ -37,8 +37,23 @@ The plan references only these prefab ids:
 - `rock`
 - `crystal`
 - `lamp`
+- `alien`
+- `astronaut`
+- `barrel`
+- `van`
+- `ambulance`
 
 Unity maps these to runtime prefab builders (procedural composites). Later, these can point to real CC0/OSS asset packs.
+
+## Built-in CC0 pack
+
+To make scenes look better without LLM mesh generation, OWP ships a tiny built-in asset pack:
+
+- `apps/owp-unity/Assets/StreamingAssets/OWPAssetPacks/kenney-cc0/`
+
+These are **CC0** glTF/GLB assets (each `.glb` has a matching `.txt` with the CC0 line).
+
+Unity loads them at runtime using the `glTFast` package.
 
 ## Extending visuals
 
@@ -49,4 +64,3 @@ Recommended path to “real” immersive worlds:
 3) Have the LLM reference assets by id and place them via plans
 
 That way, better visuals come from better assets, and the LLM acts as a **director** (composition + placement), not a mesh generator.
-

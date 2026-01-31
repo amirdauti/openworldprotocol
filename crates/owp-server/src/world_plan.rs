@@ -61,7 +61,7 @@ pub const WORLD_PLAN_SCHEMA_JSON: &str = r#"{
         "required": ["id","prefab","position","rotation","scale","color","emission_color","emission_strength"],
         "properties": {
           "id": { "type": "string", "minLength": 1, "maxLength": 48 },
-          "prefab": { "type": "string", "enum": ["tower","tree","rock","crystal","camp","portal","ruins","house","lamp"] },
+          "prefab": { "type": "string", "enum": ["tower","tree","rock","crystal","camp","portal","ruins","house","lamp","alien","astronaut","barrel","van","ambulance"] },
           "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
           "rotation": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
           "scale": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
@@ -154,6 +154,11 @@ Prefab catalog (stylized built-ins):\n\
 - rock: stylized rock\n\
 - crystal: glowing crystal spire\n\
 - lamp: sci-fi lamp post with emissive light\n\
+- alien: a small alien character statue/prop\n\
+- astronaut: an astronaut character statue/prop\n\
+- barrel: barrel prop(s)\n\
+- van: sci-fi van vehicle prop\n\
+- ambulance: sci-fi ambulance vehicle prop\n\
 \n\
 Guidance:\n\
 - Include 1 main landmark (tower OR portal), 2-4 secondary POIs (camp/ruins/house), and natural scatter (trees/rocks/crystals).\n\

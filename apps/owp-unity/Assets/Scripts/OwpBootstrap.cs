@@ -7,12 +7,14 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using GLTFast;
 using UnityEngine;
 using UnityEngine.UI;
 
 public class OwpBootstrap : MonoBehaviour
 {
     private const string AdminBaseUrl = "http://127.0.0.1:9333";
+    private const string KenneyCcoPack = "OWPAssetPacks/kenney-cc0";
     private static readonly HttpClient Http = new HttpClient();
     private static Font _defaultFont;
     private static OwpBootstrap _instance;
@@ -99,6 +101,9 @@ public class OwpBootstrap : MonoBehaviour
     private int _selectedWorldPort;
 
     private GameObject _worldRoot;
+    private GameObject _gltfCacheRoot;
+    private readonly System.Collections.Generic.Dictionary<string, GameObject> _gltfPrefabCache =
+        new System.Collections.Generic.Dictionary<string, GameObject>(StringComparer.OrdinalIgnoreCase);
 
 	    private GameObject _providerPanel;
 	    private Button _useCodexButton;
@@ -2255,11 +2260,138 @@ public class OwpBootstrap : MonoBehaviour
         return centered * heightScale;
     }
 
+    private void EnsureGltfCacheRoot()
+    {
+        if (_gltfCacheRoot != null) return;
+        _gltfCacheRoot = new GameObject("OWP_gltf_cache");
+        _gltfCacheRoot.SetActive(false);
+        DontDestroyOnLoad(_gltfCacheRoot);
+    }
+
+    private static string PickKenneyAssetForPrefab(string prefab, System.Random rng)
+    {
+        // Maps logical prefab ids to a small built-in CC0 asset pack.
+        switch ((prefab ?? "").ToLowerInvariant())
+        {
+            case "alien":
+                return "alien";
+            case "astronaut":
+                return rng.Next(0, 2) == 0 ? "astronautA" : "astronautB";
+            case "ambulance":
+                return "ambulance";
+            case "van":
+                return "van";
+            case "barrel":
+                return rng.Next(0, 2) == 0 ? "barrel" : "barrels";
+            case "lamp":
+                return rng.Next(0, 2) == 0 ? "lampRoundFloor" : "lampWall";
+            case "rock":
+            {
+                var pick = rng.Next(0, 5);
+                if (pick == 0) return "rock";
+                if (pick == 1) return "rock_largeA";
+                if (pick == 2) return "rock_largeB";
+                if (pick == 3) return "rocks_smallA";
+                return "rocks_smallB";
+            }
+            case "crystal":
+            {
+                var pick = rng.Next(0, 3);
+                if (pick == 0) return "rock_crystals";
+                if (pick == 1) return "rock_crystalsLargeA";
+                return "rock_crystalsLargeB";
+            }
+            default:
+                return null;
+        }
+    }
+
+    private static float KenneyScaleForAsset(string assetName)
+    {
+        // The Kenney CC0 models are generally authored at a small unit scale.
+        // This multiplier keeps them readable alongside our procedural primitives.
+        switch ((assetName ?? "").ToLowerInvariant())
+        {
+            case "lampwall":
+                return 1.4f;
+            case "lamproundfloor":
+                return 1.6f;
+            case "van":
+            case "ambulance":
+                return 2.4f;
+            case "astronauta":
+            case "astronautb":
+            case "alien":
+                return 1.6f;
+            default:
+                return 2.0f;
+        }
+    }
+
+    private IEnumerator InstantiateKenneyAssetInto(Transform parent, string assetName)
+    {
+        EnsureGltfCacheRoot();
+
+        if (string.IsNullOrEmpty(assetName))
+        {
+            yield break;
+        }
+
+        if (!_gltfPrefabCache.TryGetValue(assetName, out var cached) || cached == null)
+        {
+            var cachedRoot = new GameObject(assetName);
+            cachedRoot.transform.SetParent(_gltfCacheRoot.transform, false);
+
+            var path = Path.Combine(Application.streamingAssetsPath, KenneyCcoPack, assetName + ".glb");
+            var uri = new Uri(path).AbsoluteUri;
+
+            var gltf = new GltfImport();
+            var loadTask = gltf.Load(uri);
+            yield return new WaitUntil(() => loadTask.IsCompleted);
+
+            if (loadTask.Status != TaskStatus.RanToCompletion || !loadTask.Result)
+            {
+                UnityEngine.Debug.LogWarning($"GLB load failed: {assetName} ({uri})");
+                Destroy(cachedRoot);
+                yield break;
+            }
+
+            var instTask = gltf.InstantiateMainSceneAsync(cachedRoot.transform);
+            yield return new WaitUntil(() => instTask.IsCompleted);
+
+            if (instTask.Status != TaskStatus.RanToCompletion || !instTask.Result)
+            {
+                UnityEngine.Debug.LogWarning($"GLB instantiate failed: {assetName}");
+                Destroy(cachedRoot);
+                yield break;
+            }
+
+            cachedRoot.SetActive(false);
+            _gltfPrefabCache[assetName] = cachedRoot;
+            cached = cachedRoot;
+        }
+
+        var instance = Instantiate(cached, parent);
+        instance.name = assetName;
+        instance.SetActive(true);
+        instance.transform.localPosition = Vector3.zero;
+        instance.transform.localRotation = Quaternion.identity;
+        instance.transform.localScale = Vector3.one * KenneyScaleForAsset(assetName);
+    }
+
     private GameObject BuildCatalogPrefab(string prefab, WorldObject o, System.Random rng)
     {
         var baseColor = ParseHex(o.color, new Color(0.75f, 0.8f, 0.9f, 1f));
         var emissionColor = ParseHex(o.emission_color, baseColor);
         var emissionStrength = Mathf.Max(0f, o.emission_strength);
+
+        var kenneyAsset = PickKenneyAssetForPrefab(prefab, rng);
+        if (!string.IsNullOrEmpty(kenneyAsset))
+        {
+            var root = new GameObject(prefab);
+            StartCoroutine(InstantiateKenneyAssetInto(root.transform, kenneyAsset));
+            return root;
+        }
 
         switch (prefab)
         {
