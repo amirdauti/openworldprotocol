@@ -29,6 +29,7 @@ public class OwpBootstrap : MonoBehaviour
     private InputField _chatInput;
     private Text _chatLog;
     private Button _sendButton;
+    private ScrollRect _chatScrollRect;
 
     private GameObject _worldsPanel;
     private InputField _worldNameInput;
@@ -317,22 +318,42 @@ public class OwpBootstrap : MonoBehaviour
             Destroy(_worldsListRoot.GetChild(i).gameObject);
         }
 
-        float y = 0;
         foreach (var w in worlds)
         {
             if (w == null) continue;
-            var btn = CreateButtonTL(_worldsListRoot, $"World_{w.world_id}", $"{w.name}  ({w.port})", new Vector2(0, y), new Vector2(380, 30));
+            var btn = CreateButtonLayout(
+                _worldsListRoot,
+                $"World_{w.world_id}",
+                $"{w.name}  ({w.port})",
+                width: 0,
+                height: 34,
+                flexibleWidth: 1
+            );
+            var label = btn.GetComponentInChildren<Text>();
+            if (label != null)
+            {
+                label.alignment = TextAnchor.MiddleLeft;
+            }
+
+            // Simple selected-state highlight
+            var img = btn.GetComponent<Image>();
+            if (img != null)
+            {
+                img.color = (w.world_id == _selectedWorldId)
+                    ? new Color(0.18f, 0.35f, 0.55f, 0.95f)
+                    : new Color(0.15f, 0.2f, 0.25f, 0.90f);
+            }
             btn.onClick.AddListener(() =>
             {
                 SelectWorld(w.world_id, w.port, w.name);
+                RenderWorldList(worlds);
             });
-            y -= 34;
         }
 
         if (worlds.Length == 0)
         {
-            var t = CreateTextTL(_worldsListRoot, "NoWorlds", "No worlds yet. Create one.", new Vector2(0, 0), new Vector2(380, 30));
-            t.alignment = TextAnchor.MiddleLeft;
+            var t = CreateTextLayout(_worldsListRoot, "NoWorlds", "No worlds yet. Create one.", 14, TextAnchor.MiddleLeft);
+            AddLayoutElement(t.gameObject, preferredWidth: -1, preferredHeight: 22, flexibleWidth: 1);
         }
     }
 
@@ -685,7 +706,9 @@ public class OwpBootstrap : MonoBehaviour
         DontDestroyOnLoad(canvasGo);
         _canvas = canvasGo.AddComponent<Canvas>();
         _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvasGo.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        var scaler = canvasGo.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1280, 720);
         canvasGo.AddComponent<GraphicRaycaster>();
 
         if (FindObjectOfType<UnityEngine.EventSystems.EventSystem>() == null)
@@ -696,37 +719,101 @@ public class OwpBootstrap : MonoBehaviour
             es.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
         }
 
-        _orbButton = CreateButton(canvasGo.transform, "OrbButton", "◉", new Vector2(-40, -40), new Vector2(60, 60));
-        _orbButton.onClick.AddListener(() =>
+        // Root UI container
+        var root = new GameObject("Root");
+        root.transform.SetParent(canvasGo.transform, false);
+        var rootRt = root.AddComponent<RectTransform>();
+        rootRt.anchorMin = Vector2.zero;
+        rootRt.anchorMax = Vector2.one;
+        rootRt.offsetMin = Vector2.zero;
+        rootRt.offsetMax = Vector2.zero;
+
+        // Worlds panel (left)
+        _worldsPanel = CreatePanel(root.transform, "WorldsPanel", new Color(0, 0, 0, 0.35f));
+        var worldsRt = _worldsPanel.GetComponent<RectTransform>();
+        worldsRt.anchorMin = new Vector2(0, 0);
+        worldsRt.anchorMax = new Vector2(0.42f, 1);
+        worldsRt.offsetMin = new Vector2(16, 16);
+        worldsRt.offsetMax = new Vector2(-8, -16);
+
+        var worldsLayout = _worldsPanel.AddComponent<VerticalLayoutGroup>();
+        worldsLayout.padding = new RectOffset(12, 12, 12, 12);
+        worldsLayout.spacing = 10;
+        worldsLayout.childControlWidth = true;
+        worldsLayout.childControlHeight = true;
+        worldsLayout.childForceExpandWidth = true;
+        worldsLayout.childForceExpandHeight = false;
+
+        // Worlds header row
+        var worldsHeader = CreateRow(_worldsPanel.transform, "WorldsHeader", 32);
+        var worldsTitle = CreateTextLayout(worldsHeader.transform, "WorldsTitle", "Worlds", 18, TextAnchor.MiddleLeft);
+        AddLayoutElement(worldsTitle.gameObject, preferredWidth: -1, preferredHeight: 32, flexibleWidth: 1);
+        _worldsSourceButton = CreateButtonLayout(worldsHeader.transform, "WorldsSource", "Source: Local", 140, 28);
+        _worldsSourceLabel = _worldsSourceButton.GetComponentInChildren<Text>();
+        _worldsSourceButton.onClick.AddListener(() =>
         {
-            _chatPanel.SetActive(!_chatPanel.activeSelf);
+            SetWorldsSource(!_worldsUseOnChain);
+            StartCoroutine(RefreshWorlds());
+        });
+        _refreshWorldsButton = CreateButtonLayout(worldsHeader.transform, "RefreshWorlds", "Refresh", 110, 28);
+        _refreshWorldsButton.onClick.AddListener(() => StartCoroutine(RefreshWorlds()));
+
+        // Worlds create row
+        var createRow = CreateRow(_worldsPanel.transform, "WorldsCreate", 32);
+        _worldNameInput = CreateInputLayout(createRow.transform, "WorldName", "World name…", 0, 32, flexibleWidth: 1);
+        _createWorldButton = CreateButtonLayout(createRow.transform, "CreateWorld", "Create", 110, 32);
+        _createWorldButton.onClick.AddListener(() =>
+        {
+            var n = (_worldNameInput.text ?? "").Trim();
+            if (n.Length == 0) return;
+            _worldNameInput.text = "";
+            StartCoroutine(CreateWorld(n));
         });
 
-        _chatPanel = new GameObject("ChatPanel");
-        _chatPanel.transform.SetParent(canvasGo.transform, false);
-        var panelImage = _chatPanel.AddComponent<Image>();
-        panelImage.color = new Color(0, 0, 0, 0.7f);
-        var rt = _chatPanel.GetComponent<RectTransform>();
-        rt.anchorMin = new Vector2(1, 1);
-        rt.anchorMax = new Vector2(1, 1);
-        rt.pivot = new Vector2(1, 1);
-        rt.sizeDelta = new Vector2(420, 280);
-        rt.anchoredPosition = new Vector2(-20, -20);
-        _chatPanel.SetActive(false);
+        _selectedWorldLabel = CreateTextLayout(_worldsPanel.transform, "SelectedWorld", "Selected: (none)", 14, TextAnchor.MiddleLeft);
+        AddLayoutElement(_selectedWorldLabel.gameObject, preferredWidth: -1, preferredHeight: 22, flexibleWidth: 1);
 
-        _providerButton = CreateButton(_chatPanel.transform, "ProviderButton", "Provider: (loading…)", new Vector2(-10, -10), new Vector2(180, 24));
+        // Worlds list (scroll)
+        var worldsScroll = CreateScrollView(_worldsPanel.transform, "WorldsScroll");
+        AddLayoutElement(worldsScroll.scrollRect.gameObject, preferredWidth: -1, preferredHeight: -1, flexibleWidth: 1, flexibleHeight: 1);
+        _worldsListRoot = worldsScroll.content;
+
+        _hostConnectButton = CreateButtonLayout(_worldsPanel.transform, "HostConnect", "Host + Connect", 0, 34, flexibleWidth: 1);
+        _hostConnectButton.onClick.AddListener(() => StartCoroutine(HostAndConnectSelectedWorld()));
+
+        // Companion panel (right)
+        _chatPanel = CreatePanel(root.transform, "CompanionPanel", new Color(0, 0, 0, 0.70f));
+        var chatRt = _chatPanel.GetComponent<RectTransform>();
+        chatRt.anchorMin = new Vector2(0.42f, 0);
+        chatRt.anchorMax = new Vector2(1, 1);
+        chatRt.offsetMin = new Vector2(8, 16);
+        chatRt.offsetMax = new Vector2(-16, -16);
+
+        var chatLayout = _chatPanel.AddComponent<VerticalLayoutGroup>();
+        chatLayout.padding = new RectOffset(12, 12, 12, 12);
+        chatLayout.spacing = 10;
+        chatLayout.childControlWidth = true;
+        chatLayout.childControlHeight = true;
+        chatLayout.childForceExpandWidth = true;
+        chatLayout.childForceExpandHeight = false;
+
+        var chatHeader = CreateRow(_chatPanel.transform, "CompanionHeader", 32);
+        var companionTitle = CreateTextLayout(chatHeader.transform, "CompanionTitle", "Companion", 18, TextAnchor.MiddleLeft);
+        AddLayoutElement(companionTitle.gameObject, preferredWidth: -1, preferredHeight: 32, flexibleWidth: 1);
+        _providerButton = CreateButtonLayout(chatHeader.transform, "ProviderButton", "Provider: (loading…)", 180, 28);
         _providerButtonLabel = _providerButton.GetComponentInChildren<Text>();
-        _providerButton.onClick.AddListener(() =>
-        {
-            StartCoroutine(RefreshAssistantStatus(true));
-        });
+        _providerButton.onClick.AddListener(() => StartCoroutine(RefreshAssistantStatus(true)));
 
-        _chatLog = CreateText(_chatPanel.transform, "ChatLog", "", new Vector2(-10, -40), new Vector2(400, 170));
+        var chatScroll = CreateChatScroll(_chatPanel.transform, "ChatScroll");
+        AddLayoutElement(chatScroll.scrollRect.gameObject, preferredWidth: -1, preferredHeight: -1, flexibleWidth: 1, flexibleHeight: 1);
+        _chatLog = chatScroll.text;
+        _chatScrollRect = chatScroll.scrollRect;
         _chatLog.alignment = TextAnchor.UpperLeft;
         _chatLog.supportRichText = true;
 
-        _chatInput = CreateInput(_chatPanel.transform, "ChatInput", new Vector2(-110, -230), new Vector2(300, 32));
-        _sendButton = CreateButton(_chatPanel.transform, "SendButton", "Send", new Vector2(-10, -230), new Vector2(80, 32));
+        var inputRow = CreateRow(_chatPanel.transform, "ChatInputRow", 36);
+        _chatInput = CreateInputLayout(inputRow.transform, "ChatInput", "Describe your avatar…", 0, 36, flexibleWidth: 1);
+        _sendButton = CreateButtonLayout(inputRow.transform, "SendButton", "Send", 110, 36);
         _sendButton.onClick.AddListener(() =>
         {
             var text = _chatInput.text ?? "";
@@ -734,6 +821,13 @@ public class OwpBootstrap : MonoBehaviour
             _chatInput.text = "";
             AppendLog($"You: {text}");
             StartCoroutine(GenerateAvatar(text));
+        });
+
+        // Orb toggle (top-right)
+        _orbButton = CreateButton(canvasGo.transform, "OrbButton", "◉", new Vector2(-40, -40), new Vector2(60, 60));
+        _orbButton.onClick.AddListener(() =>
+        {
+            _chatPanel.SetActive(!_chatPanel.activeSelf);
         });
 
         // Provider panel (center)
@@ -748,9 +842,9 @@ public class OwpBootstrap : MonoBehaviour
         prt.sizeDelta = new Vector2(420, 160);
         prt.anchoredPosition = Vector2.zero;
 
-        var title = CreateText(_providerPanel.transform, "ProviderTitle", "Choose provider", new Vector2(-10, -20), new Vector2(400, 40));
-        title.alignment = TextAnchor.MiddleCenter;
-        title.fontSize = 20;
+        var providerTitle = CreateText(_providerPanel.transform, "ProviderTitle", "Choose provider", new Vector2(-10, -20), new Vector2(400, 40));
+        providerTitle.alignment = TextAnchor.MiddleCenter;
+        providerTitle.fontSize = 20;
 
         _useCodexButton = CreateButton(_providerPanel.transform, "UseCodex", "Use Codex", new Vector2(-220, -80), new Vector2(180, 44));
         _useClaudeButton = CreateButton(_providerPanel.transform, "UseClaude", "Use Claude", new Vector2(-20, -80), new Vector2(180, 44));
@@ -760,60 +854,221 @@ public class OwpBootstrap : MonoBehaviour
 
         _providerPanel.SetActive(false);
 
-        // Worlds panel (top-left)
-        _worldsPanel = new GameObject("WorldsPanel");
-        _worldsPanel.transform.SetParent(canvasGo.transform, false);
-        var wimg = _worldsPanel.AddComponent<Image>();
-        wimg.color = new Color(0, 0, 0, 0.35f);
-        var wrt = _worldsPanel.GetComponent<RectTransform>();
-        wrt.anchorMin = new Vector2(0, 1);
-        wrt.anchorMax = new Vector2(0, 1);
-        wrt.pivot = new Vector2(0, 1);
-        wrt.sizeDelta = new Vector2(420, 280);
-        wrt.anchoredPosition = new Vector2(20, -20);
-
-        var wtitle = CreateTextTL(_worldsPanel.transform, "WorldsTitle", "Worlds", new Vector2(0, 0), new Vector2(400, 30));
-        wtitle.fontSize = 18;
-        wtitle.alignment = TextAnchor.MiddleLeft;
-
-        _worldsSourceButton = CreateButtonTL(_worldsPanel.transform, "WorldsSource", "Source: Local", new Vector2(140, 0), new Vector2(140, 28));
-        _worldsSourceLabel = _worldsSourceButton.GetComponentInChildren<Text>();
-        _worldsSourceButton.onClick.AddListener(() =>
-        {
-            SetWorldsSource(!_worldsUseOnChain);
-            StartCoroutine(RefreshWorlds());
-        });
-
-        _refreshWorldsButton = CreateButtonTL(_worldsPanel.transform, "RefreshWorlds", "Refresh", new Vector2(290, 0), new Vector2(110, 28));
-        _refreshWorldsButton.onClick.AddListener(() => StartCoroutine(RefreshWorlds()));
-
-        _worldNameInput = CreateInputTL(_worldsPanel.transform, "WorldName", new Vector2(0, -40), new Vector2(280, 28));
-        _createWorldButton = CreateButtonTL(_worldsPanel.transform, "CreateWorld", "Create", new Vector2(290, -40), new Vector2(110, 28));
-        _createWorldButton.onClick.AddListener(() =>
-        {
-            var n = (_worldNameInput.text ?? "").Trim();
-            if (n.Length == 0) return;
-            _worldNameInput.text = "";
-            StartCoroutine(CreateWorld(n));
-        });
-
-        _selectedWorldLabel = CreateTextTL(_worldsPanel.transform, "SelectedWorld", "Selected: (none)", new Vector2(0, -76), new Vector2(400, 24));
-        _selectedWorldLabel.alignment = TextAnchor.MiddleLeft;
-
-        var listGo = new GameObject("WorldsList");
-        listGo.transform.SetParent(_worldsPanel.transform, false);
-        var lrt = listGo.AddComponent<RectTransform>();
-        lrt.anchorMin = new Vector2(0, 1);
-        lrt.anchorMax = new Vector2(0, 1);
-        lrt.pivot = new Vector2(0, 1);
-        lrt.sizeDelta = new Vector2(400, 140);
-        lrt.anchoredPosition = new Vector2(0, -104);
-        _worldsListRoot = listGo.transform;
-
-        _hostConnectButton = CreateButtonTL(_worldsPanel.transform, "HostConnect", "Host + Connect", new Vector2(0, -250), new Vector2(400, 28));
-        _hostConnectButton.onClick.AddListener(() => StartCoroutine(HostAndConnectSelectedWorld()));
-
         SetWorldsSource(false);
+    }
+
+    private static GameObject CreatePanel(Transform parent, string name, Color bg)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        var img = go.AddComponent<Image>();
+        img.color = bg;
+        return go;
+    }
+
+    private static GameObject CreateRow(Transform parent, string name, float height)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        var le = go.AddComponent<LayoutElement>();
+        le.preferredHeight = height;
+        var h = go.AddComponent<HorizontalLayoutGroup>();
+        h.padding = new RectOffset(0, 0, 0, 0);
+        h.spacing = 8;
+        h.childAlignment = TextAnchor.MiddleLeft;
+        h.childControlWidth = true;
+        h.childControlHeight = true;
+        h.childForceExpandWidth = false;
+        h.childForceExpandHeight = true;
+        return go;
+    }
+
+    private static void AddLayoutElement(
+        GameObject go,
+        float preferredWidth = -1,
+        float preferredHeight = -1,
+        float flexibleWidth = 0,
+        float flexibleHeight = 0
+    )
+    {
+        var le = go.GetComponent<LayoutElement>();
+        if (le == null) le = go.AddComponent<LayoutElement>();
+        if (preferredWidth >= 0) le.preferredWidth = preferredWidth;
+        if (preferredHeight >= 0) le.preferredHeight = preferredHeight;
+        if (flexibleWidth > 0) le.flexibleWidth = flexibleWidth;
+        if (flexibleHeight > 0) le.flexibleHeight = flexibleHeight;
+    }
+
+    private static Text CreateTextLayout(
+        Transform parent,
+        string name,
+        string value,
+        int fontSize,
+        TextAnchor align
+    )
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        var text = go.AddComponent<Text>();
+        text.font = GetDefaultFont();
+        text.text = value;
+        text.fontSize = fontSize;
+        text.alignment = align;
+        text.horizontalOverflow = HorizontalWrapMode.Overflow;
+        text.verticalOverflow = VerticalWrapMode.Truncate;
+        text.supportRichText = false;
+        text.color = new Color(0.9f, 0.93f, 1f, 1f);
+        return text;
+    }
+
+    private static Button CreateButtonLayout(
+        Transform parent,
+        string name,
+        string label,
+        float width,
+        float height,
+        float flexibleWidth = 0
+    )
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        var img = go.AddComponent<Image>();
+        img.color = new Color(0.15f, 0.2f, 0.25f, 0.9f);
+        var btn = go.AddComponent<Button>();
+        var text = CreateTextLayout(go.transform, $"{name}_Text", label, 14, TextAnchor.MiddleCenter);
+        text.color = Color.white;
+        var trt = text.GetComponent<RectTransform>();
+        trt.anchorMin = Vector2.zero;
+        trt.anchorMax = Vector2.one;
+        trt.offsetMin = new Vector2(10, 4);
+        trt.offsetMax = new Vector2(-10, -4);
+        var le = go.AddComponent<LayoutElement>();
+        if (width > 0) le.preferredWidth = width;
+        if (height > 0) le.preferredHeight = height;
+        if (flexibleWidth > 0) le.flexibleWidth = flexibleWidth;
+        return btn;
+    }
+
+    private static InputField CreateInputLayout(
+        Transform parent,
+        string name,
+        string placeholderText,
+        float width,
+        float height,
+        float flexibleWidth = 0
+    )
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        var img = go.AddComponent<Image>();
+        img.color = new Color(1f, 1f, 1f, 0.10f);
+
+        var input = go.AddComponent<InputField>();
+        var le = go.AddComponent<LayoutElement>();
+        if (width > 0) le.preferredWidth = width;
+        if (height > 0) le.preferredHeight = height;
+        if (flexibleWidth > 0) le.flexibleWidth = flexibleWidth;
+
+        var placeholder = CreateTextLayout(go.transform, "Placeholder", placeholderText, 14, TextAnchor.MiddleLeft);
+        placeholder.color = new Color(1f, 1f, 1f, 0.35f);
+        var text = CreateTextLayout(go.transform, "Text", "", 14, TextAnchor.MiddleLeft);
+        text.color = Color.white;
+        text.supportRichText = false;
+
+        // Stretch inner text to fill input
+        var prt = placeholder.GetComponent<RectTransform>();
+        prt.anchorMin = Vector2.zero;
+        prt.anchorMax = Vector2.one;
+        prt.offsetMin = new Vector2(10, 6);
+        prt.offsetMax = new Vector2(-10, -6);
+        var trt = text.GetComponent<RectTransform>();
+        trt.anchorMin = Vector2.zero;
+        trt.anchorMax = Vector2.one;
+        trt.offsetMin = new Vector2(10, 6);
+        trt.offsetMax = new Vector2(-10, -6);
+
+        input.textComponent = text;
+        input.placeholder = placeholder;
+        input.lineType = InputField.LineType.SingleLine;
+        input.characterLimit = 256;
+        return input;
+    }
+
+    private struct ScrollView
+    {
+        public ScrollRect scrollRect;
+        public RectTransform content;
+    }
+
+    private static ScrollView CreateScrollView(Transform parent, string name)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        var bg = go.AddComponent<Image>();
+        bg.color = new Color(0, 0, 0, 0.15f);
+
+        var scroll = go.AddComponent<ScrollRect>();
+        scroll.horizontal = false;
+        scroll.movementType = ScrollRect.MovementType.Clamped;
+
+        // Viewport
+        var viewport = new GameObject("Viewport");
+        viewport.transform.SetParent(go.transform, false);
+        var vpImg = viewport.AddComponent<Image>();
+        vpImg.color = new Color(1, 1, 1, 0.02f);
+        var mask = viewport.AddComponent<Mask>();
+        mask.showMaskGraphic = false;
+        var vpRt = viewport.GetComponent<RectTransform>();
+        vpRt.anchorMin = Vector2.zero;
+        vpRt.anchorMax = Vector2.one;
+        vpRt.offsetMin = new Vector2(0, 0);
+        vpRt.offsetMax = new Vector2(0, 0);
+
+        // Content
+        var content = new GameObject("Content");
+        content.transform.SetParent(viewport.transform, false);
+        var cRt = content.AddComponent<RectTransform>();
+        cRt.anchorMin = new Vector2(0, 1);
+        cRt.anchorMax = new Vector2(1, 1);
+        cRt.pivot = new Vector2(0.5f, 1);
+        cRt.anchoredPosition = Vector2.zero;
+        cRt.sizeDelta = new Vector2(0, 0);
+
+        var vlg = content.AddComponent<VerticalLayoutGroup>();
+        vlg.padding = new RectOffset(8, 8, 8, 8);
+        vlg.spacing = 8;
+        vlg.childAlignment = TextAnchor.UpperLeft;
+        vlg.childControlWidth = true;
+        vlg.childControlHeight = true;
+        vlg.childForceExpandWidth = true;
+        vlg.childForceExpandHeight = false;
+        content.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        scroll.viewport = vpRt;
+        scroll.content = cRt;
+        scroll.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
+
+        return new ScrollView { scrollRect = scroll, content = cRt };
+    }
+
+    private struct ChatScroll
+    {
+        public ScrollRect scrollRect;
+        public Text text;
+    }
+
+    private static ChatScroll CreateChatScroll(Transform parent, string name)
+    {
+        var sv = CreateScrollView(parent, name);
+
+        var text = CreateTextLayout(sv.content.transform, "ChatText", "", 14, TextAnchor.UpperLeft);
+        text.supportRichText = true;
+        text.horizontalOverflow = HorizontalWrapMode.Wrap;
+        text.verticalOverflow = VerticalWrapMode.Overflow;
+        var le = text.gameObject.AddComponent<LayoutElement>();
+        le.flexibleWidth = 1;
+
+        return new ChatScroll { scrollRect = sv.scrollRect, text = text };
     }
 
     private void SetWorldsSource(bool onChain)
@@ -992,7 +1247,14 @@ public class OwpBootstrap : MonoBehaviour
     private void AppendLog(string line)
     {
         if (_chatLog == null) return;
-        _chatLog.text = (_chatLog.text + "\n" + line).Trim();
+        var next = (_chatLog.text + "\n" + line).Trim();
+        _chatLog.text = next;
+
+        if (_chatScrollRect != null)
+        {
+            Canvas.ForceUpdateCanvases();
+            _chatScrollRect.verticalNormalizedPosition = 0f;
+        }
     }
 
     private void OnApplicationQuit()
