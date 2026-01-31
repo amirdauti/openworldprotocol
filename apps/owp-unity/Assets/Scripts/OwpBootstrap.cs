@@ -14,6 +14,7 @@ public class OwpBootstrap : MonoBehaviour
 {
     private const string AdminBaseUrl = "http://127.0.0.1:9333";
     private static readonly HttpClient Http = new HttpClient();
+    private static Font _defaultFont;
 
     private Process _serverProcess;
     private GameObject _avatarRoot;
@@ -865,7 +866,7 @@ public class OwpBootstrap : MonoBehaviour
         rt.anchoredPosition = anchoredPos;
 
         var text = go.AddComponent<Text>();
-        text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        text.font = GetDefaultFont();
         text.text = value;
         text.fontSize = 14;
         text.color = new Color(0.85f, 0.9f, 1f, 1f);
@@ -939,11 +940,23 @@ public class OwpBootstrap : MonoBehaviour
         rt.anchoredPosition = anchoredPos;
 
         var text = go.AddComponent<Text>();
-        text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        text.font = GetDefaultFont();
         text.text = value;
         text.fontSize = 14;
         text.color = new Color(0.85f, 0.9f, 1f, 1f);
         return text;
+    }
+
+    private static Font GetDefaultFont()
+    {
+        if (_defaultFont != null) return _defaultFont;
+        // Unity 2022+ removed Arial.ttf from built-in fonts.
+        _defaultFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        if (_defaultFont == null)
+        {
+            _defaultFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        }
+        return _defaultFont;
     }
 
     private static InputField CreateInputTL(Transform parent, string name, Vector2 anchoredPos, Vector2 size)
