@@ -86,6 +86,8 @@ public class OwpBootstrap : MonoBehaviour
     private Button _worldsSourceButton;
     private Text _worldsSourceLabel;
     private Transform _worldsListRoot;
+    private InputField _worldPromptInput;
+    private Button _generateWorldButton;
     private Button _hostConnectButton;
     private Text _selectedWorldLabel;
     private bool _worldsUseOnChain;
@@ -93,6 +95,8 @@ public class OwpBootstrap : MonoBehaviour
     private Process _gameProcess;
     private string _selectedWorldId;
     private int _selectedWorldPort;
+
+    private GameObject _worldRoot;
 
 	    private GameObject _providerPanel;
 	    private Button _useCodexButton;
@@ -554,6 +558,48 @@ public class OwpBootstrap : MonoBehaviour
             ApplyAvatar(resp.avatar);
             AppendLog($"Avatar: updated → {resp.avatar.name}");
         }
+    }
+
+    private IEnumerator GenerateWorldPlan(string prompt)
+    {
+        var json = $"{{\"prompt\":{JsonEscape(prompt)}}}";
+        var task = HttpRequestAsync("POST", $"{AdminBaseUrl}/world/plan", json, 180);
+        yield return new WaitUntil(() => task.IsCompleted);
+
+        if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok)
+        {
+            var status = task.Status == TaskStatus.RanToCompletion ? task.Result.status : 0;
+            if (status == 404)
+            {
+                AppendLog("World: server is outdated (missing /world/plan).");
+                AppendLog("World: stop Play mode, rebuild `owp-server`, then Play again.");
+                yield break;
+            }
+            if (status == 412)
+            {
+                AppendLog("World: choose Codex or Claude first.");
+                _providerPanel.SetActive(true);
+                yield break;
+            }
+
+            var detail = task.Status == TaskStatus.RanToCompletion ? (task.Result.text ?? "") : (task.Exception?.GetBaseException().Message ?? "");
+            detail = (detail ?? "").Trim();
+            if (detail.Length > 180) detail = detail.Substring(0, 180) + "…";
+            AppendLog(detail.Length == 0
+                ? $"World: plan generation failed ({status})."
+                : $"World: plan generation failed ({status}) → {detail}");
+            yield break;
+        }
+
+        var resp = JsonUtility.FromJson<WorldPlanResponse>(task.Result.text);
+        if (resp == null || resp.plan == null)
+        {
+            AppendLog("World: plan parse failed.");
+            yield break;
+        }
+
+        ApplyWorldPlan(resp.plan);
+        AppendLog($"World: generated → {resp.plan.name}");
     }
 
     private IEnumerator RefreshWorlds()
@@ -1942,6 +1988,399 @@ public class OwpBootstrap : MonoBehaviour
         }
     }
 
+    private void ApplyWorldPlan(WorldPlan plan)
+    {
+        if (plan == null || plan.ground == null || plan.sky == null || plan.fog == null)
+        {
+            AppendLog("World: invalid plan.");
+            return;
+        }
+
+        EnsureStarterMeshes();
+        EnsureWorldRoot();
+        ClearChildren(_worldRoot.transform);
+
+        ApplyWorldRenderSettings(plan);
+
+        // Ground mesh
+        var groundGo = new GameObject("Ground");
+        groundGo.transform.SetParent(_worldRoot.transform, false);
+        var mf = groundGo.AddComponent<MeshFilter>();
+        mf.sharedMesh = BuildGroundMesh(plan.ground, plan.seed);
+        var mr = groundGo.AddComponent<MeshRenderer>();
+        mr.material = CreateGroundMaterial(plan.ground);
+
+        var rng = new System.Random(plan.seed);
+        if (plan.objects != null)
+        {
+            foreach (var o in plan.objects)
+            {
+                if (o == null) continue;
+                var prefab = (o.prefab ?? "").ToLowerInvariant();
+                var go = BuildCatalogPrefab(prefab, o, rng);
+                go.transform.SetParent(_worldRoot.transform, false);
+
+                var p = ToVector3(o.position, Vector3.zero);
+                var r = ToVector3(o.rotation, Vector3.zero);
+                var s = ToVector3(o.scale, Vector3.one);
+
+                // Place on ground by default; allow user-specified offset via position.y
+                var groundY = SampleGroundHeight(plan.ground, plan.seed, p.x, p.z);
+                go.transform.position = new Vector3(p.x, groundY + p.y, p.z);
+                go.transform.rotation = Quaternion.Euler(r);
+                go.transform.localScale = s;
+            }
+        }
+
+        RepositionCamera(plan.ground.size);
+    }
+
+    private void EnsureWorldRoot()
+    {
+        if (_worldRoot != null) return;
+        _worldRoot = new GameObject("OWP_WorldRoot");
+        DontDestroyOnLoad(_worldRoot);
+    }
+
+    private static void ClearChildren(Transform t)
+    {
+        for (int i = t.childCount - 1; i >= 0; i--)
+        {
+            Destroy(t.GetChild(i).gameObject);
+        }
+    }
+
+    private void ApplyWorldRenderSettings(WorldPlan plan)
+    {
+        // Skybox (Procedural)
+        var skyShader = Shader.Find("Skybox/Procedural");
+        if (skyShader != null)
+        {
+            var sky = new Material(skyShader);
+            sky.SetColor("_SkyTint", ParseHex(plan.sky.sky_tint, new Color(0.55f, 0.7f, 1f, 1f)));
+            sky.SetColor("_GroundColor", ParseHex(plan.sky.ground_color, new Color(0.3f, 0.3f, 0.35f, 1f)));
+            sky.SetFloat("_AtmosphereThickness", Mathf.Clamp(plan.sky.atmosphere_thickness, 0.5f, 4.0f));
+            sky.SetFloat("_SunSize", Mathf.Clamp(plan.sky.sun_size, 0.01f, 1.0f));
+            RenderSettings.skybox = sky;
+        }
+
+        RenderSettings.fog = plan.fog.enabled;
+        RenderSettings.fogColor = ParseHex(plan.fog.color, new Color(0.2f, 0.3f, 0.4f, 1f));
+        RenderSettings.fogDensity = Mathf.Clamp(plan.fog.density, 0.0f, 0.05f);
+
+        RenderSettings.ambientLight = new Color(0.2f, 0.25f, 0.35f, 1f);
+        RenderSettings.ambientIntensity = 1.05f;
+    }
+
+    private Material CreateGroundMaterial(WorldGround ground)
+    {
+        var mat = new Material(Shader.Find("Standard"));
+        mat.color = ParseHex(ground.color, new Color(0.22f, 0.25f, 0.24f, 1f));
+        if (_starterTexScales != null)
+        {
+            mat.mainTexture = _starterTexScales;
+            var tiling = Mathf.Clamp(ground.size / 8f, 2f, 40f);
+            mat.mainTextureScale = new Vector2(tiling, tiling);
+        }
+        mat.SetFloat("_Glossiness", 0.2f);
+        return mat;
+    }
+
+    private static Mesh BuildGroundMesh(WorldGround ground, int seed)
+    {
+        var grid = Mathf.Clamp(ground.grid, 16, 256);
+        var size = Mathf.Clamp(ground.size, 20f, 400f);
+
+        var verts = new Vector3[(grid + 1) * (grid + 1)];
+        var uvs = new Vector2[verts.Length];
+        var tris = new int[grid * grid * 6];
+
+        int vi = 0;
+        for (int z = 0; z <= grid; z++)
+        {
+            float vz = ((float)z / grid - 0.5f) * size;
+            for (int x = 0; x <= grid; x++)
+            {
+                float vx = ((float)x / grid - 0.5f) * size;
+                float y = SampleGroundHeight(ground, seed, vx, vz);
+                verts[vi] = new Vector3(vx, y, vz);
+                uvs[vi] = new Vector2((float)x / grid, (float)z / grid);
+                vi++;
+            }
+        }
+
+        int ti = 0;
+        for (int z = 0; z < grid; z++)
+        {
+            for (int x = 0; x < grid; x++)
+            {
+                int a = z * (grid + 1) + x;
+                int b = a + 1;
+                int c = a + (grid + 1);
+                int d = c + 1;
+
+                tris[ti++] = a;
+                tris[ti++] = c;
+                tris[ti++] = b;
+                tris[ti++] = b;
+                tris[ti++] = c;
+                tris[ti++] = d;
+            }
+        }
+
+        var m = new Mesh();
+        m.indexFormat = verts.Length > 65000 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
+        m.vertices = verts;
+        m.uv = uvs;
+        m.triangles = tris;
+        m.RecalculateNormals();
+        m.RecalculateBounds();
+        return m;
+    }
+
+    private static float SampleGroundHeight(WorldGround ground, int seed, float x, float z)
+    {
+        var noiseScale = Mathf.Max(0.5f, ground.noise_scale);
+        var heightScale = Mathf.Clamp(ground.height_scale, 0f, 40f);
+
+        // Seed acts as an offset so worlds are stable but different.
+        float ox = seed * 0.0137f;
+        float oz = seed * 0.0211f;
+        float n = Mathf.PerlinNoise((x / noiseScale) + ox, (z / noiseScale) + oz);
+        // Centered noise [-1..1]
+        float centered = (n - 0.5f) * 2f;
+        return centered * heightScale;
+    }
+
+    private GameObject BuildCatalogPrefab(string prefab, WorldObject o, System.Random rng)
+    {
+        var baseColor = ParseHex(o.color, new Color(0.75f, 0.8f, 0.9f, 1f));
+        var emissionColor = ParseHex(o.emission_color, baseColor);
+        var emissionStrength = Mathf.Max(0f, o.emission_strength);
+
+        switch (prefab)
+        {
+            case "tower": return BuildTower(baseColor, emissionColor, emissionStrength);
+            case "house": return BuildHouse(baseColor, emissionColor, emissionStrength);
+            case "ruins": return BuildRuins(baseColor, emissionColor, emissionStrength, rng);
+            case "camp": return BuildCamp(baseColor, emissionColor, emissionStrength);
+            case "portal": return BuildPortal(baseColor, emissionColor, emissionStrength);
+            case "tree": return BuildTree(baseColor, emissionColor, emissionStrength, rng);
+            case "rock": return BuildRock(baseColor, emissionColor, emissionStrength, rng);
+            case "crystal": return BuildCrystal(baseColor, emissionColor, emissionStrength, rng);
+            case "lamp": return BuildLamp(baseColor, emissionColor, emissionStrength);
+            default: return BuildFallback(baseColor, emissionColor, emissionStrength);
+        }
+    }
+
+    private Material CreateWorldMaterial(string prefab, Color baseColor, Color emissionColor, float emissionStrength)
+    {
+        var mat = new Material(Shader.Find("Standard"));
+        mat.color = baseColor;
+
+        var tex = PickStarterTexture(prefab);
+        if (tex != null)
+        {
+            mat.mainTexture = tex;
+            mat.mainTextureScale = new Vector2(2f, 2f);
+        }
+
+        mat.SetFloat("_Glossiness", 0.3f);
+        if (emissionStrength > 0.01f)
+        {
+            mat.EnableKeyword("_EMISSION");
+            mat.SetColor("_EmissionColor", emissionColor * emissionStrength);
+        }
+        return mat;
+    }
+
+    private Texture2D PickStarterTexture(string prefab)
+    {
+        switch (prefab)
+        {
+            case "tower": return _starterTexCircuit;
+            case "house": return _starterTexStripes;
+            case "camp": return _starterTexCloth;
+            case "tree": return _starterTexScales;
+            case "ruins": return _starterTexScales;
+            default: return null;
+        }
+    }
+
+    private GameObject CreatePrimitivePart(Transform parent, string name, PrimitiveType type, Vector3 localPos, Vector3 localScale, Quaternion localRot, Material mat)
+    {
+        var go = GameObject.CreatePrimitive(type);
+        go.name = name;
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = localPos;
+        go.transform.localRotation = localRot;
+        go.transform.localScale = localScale;
+        RemoveCollider(go);
+        var r = go.GetComponent<Renderer>();
+        if (r != null && mat != null) r.material = mat;
+        return go;
+    }
+
+    private GameObject CreateMeshPart(Transform parent, string name, Mesh mesh, Vector3 localPos, Vector3 localScale, Quaternion localRot, Material mat)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = localPos;
+        go.transform.localRotation = localRot;
+        go.transform.localScale = localScale;
+        var mf = go.AddComponent<MeshFilter>();
+        mf.sharedMesh = mesh;
+        var mr = go.AddComponent<MeshRenderer>();
+        mr.material = mat;
+        return go;
+    }
+
+    private GameObject BuildTower(Color baseColor, Color emissionColor, float emissionStrength)
+    {
+        var root = new GameObject("tower");
+        var mat = CreateWorldMaterial("tower", baseColor, emissionColor, emissionStrength);
+
+        CreatePrimitivePart(root.transform, "Base", PrimitiveType.Cylinder, new Vector3(0f, 1.4f, 0f), new Vector3(1.6f, 2.8f, 1.6f), Quaternion.identity, mat);
+        CreatePrimitivePart(root.transform, "Mid", PrimitiveType.Cylinder, new Vector3(0f, 3.9f, 0f), new Vector3(1.3f, 2.2f, 1.3f), Quaternion.identity, mat);
+        CreateMeshPart(root.transform, "Roof", _meshCone, new Vector3(0f, 6.2f, 0f), new Vector3(1.6f, 1.3f, 1.6f), Quaternion.identity, mat);
+
+        // Simple emissive windows band when requested
+        if (emissionStrength > 0.01f)
+        {
+            var wMat = CreateWorldMaterial("tower", baseColor * 0.25f, emissionColor, emissionStrength);
+            CreatePrimitivePart(root.transform, "Windows", PrimitiveType.Cylinder, new Vector3(0f, 4.6f, 0f), new Vector3(1.33f, 0.12f, 1.33f), Quaternion.identity, wMat);
+        }
+
+        return root;
+    }
+
+    private GameObject BuildHouse(Color baseColor, Color emissionColor, float emissionStrength)
+    {
+        var root = new GameObject("house");
+        var mat = CreateWorldMaterial("house", baseColor, emissionColor, emissionStrength);
+        var roofMat = CreateWorldMaterial("house", baseColor * 0.85f, emissionColor, emissionStrength);
+
+        CreatePrimitivePart(root.transform, "Body", PrimitiveType.Cube, new Vector3(0f, 0.75f, 0f), new Vector3(2.2f, 1.5f, 2.0f), Quaternion.identity, mat);
+        CreatePrimitivePart(root.transform, "Roof", PrimitiveType.Cube, new Vector3(0f, 1.75f, 0f), new Vector3(2.4f, 0.6f, 2.2f), Quaternion.Euler(0f, 45f, 0f), roofMat);
+        CreatePrimitivePart(root.transform, "Door", PrimitiveType.Cube, new Vector3(0f, 0.45f, 1.02f), new Vector3(0.5f, 0.9f, 0.08f), Quaternion.identity, roofMat);
+
+        return root;
+    }
+
+    private GameObject BuildRuins(Color baseColor, Color emissionColor, float emissionStrength, System.Random rng)
+    {
+        var root = new GameObject("ruins");
+        var mat = CreateWorldMaterial("ruins", baseColor, emissionColor, emissionStrength);
+
+        CreatePrimitivePart(root.transform, "PillarA", PrimitiveType.Cube, new Vector3(-1.1f, 1.0f, 0f), new Vector3(0.4f, 2.0f, 0.4f), Quaternion.identity, mat);
+        CreatePrimitivePart(root.transform, "PillarB", PrimitiveType.Cube, new Vector3(1.1f, 1.0f, 0f), new Vector3(0.4f, 2.0f, 0.4f), Quaternion.identity, mat);
+        CreatePrimitivePart(root.transform, "Lintel", PrimitiveType.Cube, new Vector3(0f, 2.1f, 0f), new Vector3(2.6f, 0.35f, 0.45f), Quaternion.identity, mat);
+
+        for (int i = 0; i < 4; i++)
+        {
+            float rx = (float)(rng.NextDouble() * 2.2 - 1.1);
+            float rz = (float)(rng.NextDouble() * 1.4 - 0.7);
+            float s = 0.25f + (float)rng.NextDouble() * 0.25f;
+            CreatePrimitivePart(root.transform, "Rubble", PrimitiveType.Sphere, new Vector3(rx, 0.15f, rz), new Vector3(s, s * 0.6f, s), Quaternion.identity, mat);
+        }
+
+        return root;
+    }
+
+    private GameObject BuildCamp(Color baseColor, Color emissionColor, float emissionStrength)
+    {
+        var root = new GameObject("camp");
+        var tentMat = CreateWorldMaterial("camp", baseColor, emissionColor, 0f);
+        var fireMat = CreateWorldMaterial("camp", new Color(0.15f, 0.12f, 0.1f, 1f), new Color(1f, 0.55f, 0.2f, 1f), Mathf.Max(2.5f, emissionStrength));
+
+        CreatePrimitivePart(root.transform, "Tent", PrimitiveType.Cube, new Vector3(-0.7f, 0.55f, 0f), new Vector3(1.4f, 1.1f, 1.4f), Quaternion.Euler(0f, 25f, 0f), tentMat);
+        CreatePrimitivePart(root.transform, "TentTop", PrimitiveType.Cube, new Vector3(-0.7f, 1.1f, 0f), new Vector3(1.45f, 0.35f, 1.45f), Quaternion.Euler(0f, 25f, 0f), tentMat);
+
+        CreatePrimitivePart(root.transform, "FireBase", PrimitiveType.Cylinder, new Vector3(0.9f, 0.08f, 0f), new Vector3(0.7f, 0.08f, 0.7f), Quaternion.identity, tentMat);
+        CreatePrimitivePart(root.transform, "Fire", PrimitiveType.Sphere, new Vector3(0.9f, 0.25f, 0f), new Vector3(0.35f, 0.35f, 0.35f), Quaternion.identity, fireMat);
+
+        return root;
+    }
+
+    private GameObject BuildPortal(Color baseColor, Color emissionColor, float emissionStrength)
+    {
+        var root = new GameObject("portal");
+        var ringMat = CreateWorldMaterial("portal", baseColor * 0.25f, emissionColor, Mathf.Max(2.0f, emissionStrength));
+
+        CreateMeshPart(root.transform, "Ring", _meshTorus, new Vector3(0f, 1.2f, 0f), new Vector3(2.6f, 2.6f, 0.35f), Quaternion.Euler(90f, 0f, 0f), ringMat);
+        CreatePrimitivePart(root.transform, "Base", PrimitiveType.Cylinder, new Vector3(0f, 0.25f, 0f), new Vector3(1.2f, 0.25f, 1.2f), Quaternion.identity, CreateWorldMaterial("ruins", baseColor, emissionColor, 0f));
+
+        return root;
+    }
+
+    private GameObject BuildTree(Color baseColor, Color emissionColor, float emissionStrength, System.Random rng)
+    {
+        var root = new GameObject("tree");
+        var bark = CreateWorldMaterial("tree", new Color(0.22f, 0.18f, 0.14f, 1f), emissionColor, 0f);
+        var leaves = CreateWorldMaterial("tree", baseColor, emissionColor, emissionStrength);
+
+        float h = 1.8f + (float)rng.NextDouble() * 1.2f;
+        CreatePrimitivePart(root.transform, "Trunk", PrimitiveType.Cylinder, new Vector3(0f, h * 0.5f, 0f), new Vector3(0.35f, h * 0.5f, 0.35f), Quaternion.identity, bark);
+        CreatePrimitivePart(root.transform, "Canopy", PrimitiveType.Sphere, new Vector3(0f, h + 0.35f, 0f), new Vector3(1.4f, 1.2f, 1.4f), Quaternion.identity, leaves);
+
+        return root;
+    }
+
+    private GameObject BuildRock(Color baseColor, Color emissionColor, float emissionStrength, System.Random rng)
+    {
+        var root = new GameObject("rock");
+        var mat = CreateWorldMaterial("rock", baseColor * 0.7f, emissionColor, 0f);
+
+        float sx = 0.9f + (float)rng.NextDouble() * 0.6f;
+        float sy = 0.55f + (float)rng.NextDouble() * 0.4f;
+        float sz = 0.9f + (float)rng.NextDouble() * 0.6f;
+        CreatePrimitivePart(root.transform, "Boulder", PrimitiveType.Sphere, new Vector3(0f, sy * 0.5f, 0f), new Vector3(sx, sy, sz), Quaternion.identity, mat);
+
+        return root;
+    }
+
+    private GameObject BuildCrystal(Color baseColor, Color emissionColor, float emissionStrength, System.Random rng)
+    {
+        var root = new GameObject("crystal");
+        var mat = CreateWorldMaterial("crystal", baseColor * 0.35f, emissionColor, Mathf.Max(1.5f, emissionStrength));
+
+        float h = 2.2f + (float)rng.NextDouble() * 2.2f;
+        CreateMeshPart(root.transform, "Spire", _meshCone, new Vector3(0f, h * 0.5f, 0f), new Vector3(0.9f, h, 0.9f), Quaternion.identity, mat);
+        CreatePrimitivePart(root.transform, "Base", PrimitiveType.Cylinder, new Vector3(0f, 0.15f, 0f), new Vector3(0.75f, 0.15f, 0.75f), Quaternion.identity, CreateWorldMaterial("ruins", baseColor, emissionColor, 0f));
+
+        return root;
+    }
+
+    private GameObject BuildLamp(Color baseColor, Color emissionColor, float emissionStrength)
+    {
+        var root = new GameObject("lamp");
+        var poleMat = CreateWorldMaterial("lamp", baseColor, emissionColor, 0f);
+        var lightMat = CreateWorldMaterial("lamp", baseColor * 0.2f, emissionColor, Mathf.Max(2.5f, emissionStrength));
+
+        CreatePrimitivePart(root.transform, "Pole", PrimitiveType.Cylinder, new Vector3(0f, 1.25f, 0f), new Vector3(0.18f, 1.25f, 0.18f), Quaternion.identity, poleMat);
+        CreatePrimitivePart(root.transform, "Lamp", PrimitiveType.Sphere, new Vector3(0f, 2.65f, 0f), new Vector3(0.35f, 0.35f, 0.35f), Quaternion.identity, lightMat);
+
+        return root;
+    }
+
+    private GameObject BuildFallback(Color baseColor, Color emissionColor, float emissionStrength)
+    {
+        var root = new GameObject("object");
+        var mat = CreateWorldMaterial("object", baseColor, emissionColor, emissionStrength);
+        CreatePrimitivePart(root.transform, "Box", PrimitiveType.Cube, new Vector3(0f, 0.5f, 0f), new Vector3(1f, 1f, 1f), Quaternion.identity, mat);
+        return root;
+    }
+
+    private void RepositionCamera(float worldSize)
+    {
+        var cam = Camera.main;
+        if (cam == null) return;
+
+        float d = Mathf.Clamp(worldSize, 30f, 250f);
+        cam.transform.position = new Vector3(0f, d * 0.22f, -d * 0.52f);
+        cam.transform.LookAt(new Vector3(0f, 0.8f, 0f));
+    }
+
     private void CreateUi()
     {
         var canvasGo = new GameObject("OWP_UI");
@@ -2019,6 +2458,20 @@ public class OwpBootstrap : MonoBehaviour
         var worldsScroll = CreateScrollView(_worldsPanel.transform, "WorldsScroll");
         AddLayoutElement(worldsScroll.scrollRect.gameObject, preferredWidth: -1, preferredHeight: -1, flexibleWidth: 1, flexibleHeight: 1);
         _worldsListRoot = worldsScroll.content;
+
+        // World prompt (LLM → plan → assembled scene)
+        var worldPromptRow = CreateRow(_worldsPanel.transform, "WorldPromptRow", 32);
+        _worldPromptInput = CreateSciFiInput(worldPromptRow.transform, "WorldPrompt", "Describe a world scene…", 0, 28, flexibleWidth: 1);
+        _generateWorldButton = CreateSciFiButton(worldPromptRow.transform, "GenerateWorld", "Generate", 110, 28);
+        _generateWorldButton.onClick.AddListener(() =>
+        {
+            var p = (_worldPromptInput != null ? _worldPromptInput.text : "") ?? "";
+            p = p.Trim();
+            if (p.Length == 0) return;
+            _worldPromptInput.text = "";
+            AppendLog($"You: {p}");
+            StartCoroutine(GenerateWorldPlan(p));
+        });
 
         _hostConnectButton = CreateSciFiButton(_worldsPanel.transform, "HostConnect", "Host + Connect", 0, 30, flexibleWidth: 1);
         _hostConnectButton.onClick.AddListener(() => StartCoroutine(HostAndConnectSelectedWorld()));
@@ -3008,6 +3461,65 @@ public class OwpBootstrap : MonoBehaviour
     {
         public int game_port;
         public int asset_port;
+    }
+
+    [Serializable]
+    private class WorldPlanResponse
+    {
+        public WorldPlan plan;
+    }
+
+    [Serializable]
+    private class WorldPlan
+    {
+        public string version;
+        public string name;
+        public int seed;
+        public string[] biome_tags;
+        public WorldGround ground;
+        public WorldSky sky;
+        public WorldFog fog;
+        public WorldObject[] objects;
+    }
+
+    [Serializable]
+    private class WorldGround
+    {
+        public float size;
+        public int grid;
+        public float height_scale;
+        public float noise_scale;
+        public string color;
+    }
+
+    [Serializable]
+    private class WorldSky
+    {
+        public string sky_tint;
+        public string ground_color;
+        public float atmosphere_thickness;
+        public float sun_size;
+    }
+
+    [Serializable]
+    private class WorldFog
+    {
+        public bool enabled;
+        public string color;
+        public float density;
+    }
+
+    [Serializable]
+    private class WorldObject
+    {
+        public string id;
+        public string prefab;
+        public float[] position;
+        public float[] rotation;
+        public float[] scale;
+        public string color;
+        public string emission_color;
+        public float emission_strength;
     }
 
     [Serializable]

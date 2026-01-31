@@ -18,6 +18,7 @@ use crate::assistant::{self, AssistantProviderId};
 use crate::avatar as avatar_mod;
 use crate::avatar_mesh as avatar_mesh_mod;
 use crate::storage::WorldStore;
+use crate::world_plan as world_plan_mod;
 
 #[derive(Clone)]
 pub enum AuthMode {
@@ -449,6 +450,38 @@ async fn generate_avatar_mesh(
 }
 
 #[derive(Debug, Deserialize)]
+struct WorldPlanRequest {
+    prompt: String,
+}
+
+#[derive(Debug, Serialize)]
+struct WorldPlanResponse {
+    plan: world_plan_mod::WorldPlanV1,
+}
+
+async fn generate_world_plan(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<WorldPlanRequest>,
+) -> Result<Json<WorldPlanResponse>, StatusCode> {
+    require_auth(&headers, &st.auth)?;
+
+    let cfg = assistant::load_config(&st.store).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if cfg.provider.is_none() {
+        return Err(StatusCode::PRECONDITION_FAILED);
+    };
+
+    let plan = world_plan_mod::generate_world_plan(&st.store, &cfg, &req.prompt)
+        .await
+        .map_err(|e| {
+            error!("world plan generation failed: {e:#}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(WorldPlanResponse { plan }))
+}
+
+#[derive(Debug, Deserialize)]
 struct AvatarMeshQuery {
     #[serde(default)]
     profile_id: Option<String>,
@@ -509,6 +542,7 @@ pub async fn serve(
         .route("/avatar/generate", post(generate_avatar))
         .route("/avatar/mesh", get(get_avatar_mesh))
         .route("/avatar/mesh/generate", post(generate_avatar_mesh))
+        .route("/world/plan", post(generate_world_plan))
         .route("/worlds", get(list_worlds).post(create_world))
         .route("/discovery/worlds", get(discovery_worlds))
         .route("/worlds/:world_id/manifest", get(get_manifest))

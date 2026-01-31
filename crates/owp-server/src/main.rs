@@ -8,6 +8,7 @@ mod avatar_mesh;
 mod storage;
 mod tcp_game;
 mod web_admin;
+mod world_plan;
 
 #[derive(Debug, Parser)]
 #[command(
