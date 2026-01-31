@@ -48,6 +48,9 @@ Notes:
 
 Requirements (for mesh avatars):
 - `openscad` must be installed and available on `PATH` on the host machine.
+  - macOS (Apple Silicon): Homebrew currently installs an Intel build and requires Rosetta 2:
+    - `brew install openscad`
+    - `softwareupdate --install-rosetta --agree-to-license`
 
 ## Switching providers
 
