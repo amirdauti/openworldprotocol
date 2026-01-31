@@ -30,7 +30,8 @@ Example shape:
   "provider": "codex",
   "codex_model": "gpt-5.2-codex",
   "codex_reasoning_effort": "xhigh",
-  "claude_model": "sonnet"
+  "claude_model": "sonnet",
+  "avatar_mesh_enabled": true
 }
 ```
 
@@ -40,6 +41,13 @@ Notes:
   - The Unity UI uses `very_high` but stores/sends `xhigh`.
 - `claude_model` is passed to Claude via `claude --model <MODEL>` (string).
   - Common aliases include `haiku`, `sonnet`, `opus` (availability varies by account).
+- `avatar_mesh_enabled` enables the **hybrid “prompt anything” avatar pipeline**:
+  - Companion prompt → provider generates OpenSCAD code (JSON schema output)
+  - server runs `openscad` headlessly to render `avatar.stl`
+  - Unity downloads the STL and displays it at runtime
+
+Requirements (for mesh avatars):
+- `openscad` must be installed and available on `PATH` on the host machine.
 
 ## Switching providers
 
@@ -63,6 +71,8 @@ Current admin API:
 - `GET /assistant/config` → reads provider/model settings
 - `POST /assistant/config` → updates provider/model settings
 - `POST /assistant/chat` → companion chat backed by local CLI; returns `{ reply, avatar? }`
+- `POST /avatar/mesh/generate` → (optional) generates avatar mesh directly from a prompt
+- `GET /avatar/mesh?profile_id=...` → downloads STL bytes for the current avatar mesh
 
 `POST /assistant/chat` also persists chat history under:
 - `~/.owp/profiles/<profile_id>/companion_history.json`

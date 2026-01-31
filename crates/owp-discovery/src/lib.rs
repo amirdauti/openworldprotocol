@@ -25,7 +25,10 @@ struct ProgramAccountData {
 }
 
 /// Fetch all published worlds from a Solana RPC via `getProgramAccounts`.
-pub async fn fetch_worlds_from_rpc(rpc_url: &str, registry_program_id: &str) -> Result<Vec<WorldDirectoryEntry>> {
+pub async fn fetch_worlds_from_rpc(
+    rpc_url: &str,
+    registry_program_id: &str,
+) -> Result<Vec<WorldDirectoryEntry>> {
     let client = reqwest::Client::new();
 
     let body = json!({

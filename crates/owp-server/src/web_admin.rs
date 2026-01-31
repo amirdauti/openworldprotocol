@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
+    response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
@@ -15,6 +16,7 @@ use uuid::Uuid;
 
 use crate::assistant::{self, AssistantProviderId};
 use crate::avatar as avatar_mod;
+use crate::avatar_mesh as avatar_mesh_mod;
 use crate::storage::WorldStore;
 
 #[derive(Clone)]
@@ -196,6 +198,7 @@ struct AssistantConfigResponse {
     codex_reasoning_effort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     claude_model: Option<String>,
+    avatar_mesh_enabled: bool,
 }
 
 async fn get_assistant_config(
@@ -209,6 +212,7 @@ async fn get_assistant_config(
         codex_model: cfg.codex_model,
         codex_reasoning_effort: cfg.codex_reasoning_effort,
         claude_model: cfg.claude_model,
+        avatar_mesh_enabled: cfg.avatar_mesh_enabled,
     }))
 }
 
@@ -222,6 +226,8 @@ struct SetAssistantConfigRequest {
     codex_reasoning_effort: Option<String>,
     #[serde(default)]
     claude_model: Option<String>,
+    #[serde(default)]
+    avatar_mesh_enabled: Option<bool>,
 }
 
 fn normalize_optional_string(v: Option<String>) -> Option<String> {
@@ -242,7 +248,8 @@ async fn set_assistant_config(
 ) -> Result<Json<AssistantConfigResponse>, StatusCode> {
     require_auth(&headers, &st.auth)?;
 
-    let mut cfg = assistant::load_config(&st.store).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut cfg =
+        assistant::load_config(&st.store).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if let Some(p) = req.provider {
         cfg.provider = match p.as_str() {
@@ -264,10 +271,19 @@ async fn set_assistant_config(
                 _ => return Err(StatusCode::BAD_REQUEST),
             }
         }
-        cfg.codex_reasoning_effort = v.map(|e| if e == "very_high" { "xhigh".to_string() } else { e });
+        cfg.codex_reasoning_effort = v.map(|e| {
+            if e == "very_high" {
+                "xhigh".to_string()
+            } else {
+                e
+            }
+        });
     }
     if req.claude_model.is_some() {
         cfg.claude_model = normalize_optional_string(req.claude_model);
+    }
+    if let Some(v) = req.avatar_mesh_enabled {
+        cfg.avatar_mesh_enabled = v;
     }
 
     assistant::save_config(&st.store, &cfg).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -277,6 +293,7 @@ async fn set_assistant_config(
         codex_model: cfg.codex_model,
         codex_reasoning_effort: cfg.codex_reasoning_effort,
         claude_model: cfg.claude_model,
+        avatar_mesh_enabled: cfg.avatar_mesh_enabled,
     }))
 }
 
@@ -395,6 +412,69 @@ async fn generate_avatar(
     Ok(Json(AvatarGenerateResponse { avatar }))
 }
 
+#[derive(Debug, Deserialize)]
+struct AvatarMeshGenerateRequest {
+    prompt: String,
+    #[serde(default)]
+    profile_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AvatarMeshGenerateResponse {
+    avatar: AvatarSpecV1,
+}
+
+async fn generate_avatar_mesh(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<AvatarMeshGenerateRequest>,
+) -> Result<Json<AvatarMeshGenerateResponse>, StatusCode> {
+    require_auth(&headers, &st.auth)?;
+
+    let cfg = assistant::load_config(&st.store).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if cfg.provider.is_none() {
+        return Err(StatusCode::PRECONDITION_FAILED);
+    };
+
+    let profile_id = req.profile_id.as_deref().unwrap_or("local");
+
+    let avatar = avatar_mesh_mod::generate_avatar_mesh(&st.store, &cfg, profile_id, &req.prompt)
+        .await
+        .map_err(|e| {
+            error!("avatar mesh generation failed: {e:#}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(AvatarMeshGenerateResponse { avatar }))
+}
+
+#[derive(Debug, Deserialize)]
+struct AvatarMeshQuery {
+    #[serde(default)]
+    profile_id: Option<String>,
+}
+
+async fn get_avatar_mesh(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<AvatarMeshQuery>,
+) -> Result<axum::response::Response, StatusCode> {
+    require_auth(&headers, &st.auth)?;
+    let profile_id = q.profile_id.as_deref().unwrap_or("local");
+    if !avatar_mesh_mod::avatar_mesh_exists(&st.store, profile_id) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let bytes = avatar_mesh_mod::read_mesh_bytes(&st.store, profile_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok((
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+        bytes,
+    )
+        .into_response())
+}
+
 pub async fn serve(
     listen: String,
     store: WorldStore,
@@ -412,10 +492,15 @@ pub async fn serve(
         .route("/health", get(health))
         .route("/assistant/status", get(assistant_status))
         .route("/assistant/provider", post(set_provider))
-        .route("/assistant/config", get(get_assistant_config).post(set_assistant_config))
+        .route(
+            "/assistant/config",
+            get(get_assistant_config).post(set_assistant_config),
+        )
         .route("/assistant/chat", post(assistant_chat))
         .route("/avatar", get(get_avatar))
         .route("/avatar/generate", post(generate_avatar))
+        .route("/avatar/mesh", get(get_avatar_mesh))
+        .route("/avatar/mesh/generate", post(generate_avatar_mesh))
         .route("/worlds", get(list_worlds).post(create_world))
         .route("/discovery/worlds", get(discovery_worlds))
         .route("/worlds/:world_id/manifest", get(get_manifest))

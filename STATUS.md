@@ -32,12 +32,14 @@ Current focus: **Milestone A — Foundations**
 - [~] Chat (Companion chat implemented; in-world chat TBD)
 - [x] Spawn local `owp-server` process (one-click host)
 - [~] Avatar preview + customization scene (procedural kit + starter pack textures)
+- [~] Avatar mesh rendering (STL download + runtime loader; OpenSCAD pipeline)
 - [x] AI companion (“orb”) UI + provider selection/settings (models + reasoning effort)
 
 ### Generation (local Claude/Codex)
 - [ ] World workspace layout + manifest format
 - [~] Claude CLI adapter (structured output; avatar + companion chat)
 - [~] Codex CLI adapter (structured output; avatar + companion chat)
+- [~] OpenSCAD avatar mesh generation (structured OpenSCAD → headless render → STL)
 - [ ] Job queue + timeouts + output size limits
 
 ### Discovery

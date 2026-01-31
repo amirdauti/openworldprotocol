@@ -10,8 +10,8 @@ use tokio::time::timeout;
 
 use owp_protocol::AvatarSpecV1;
 
+use crate::avatar as avatar_mod;
 use crate::storage::WorldStore;
-use crate::{avatar as avatar_mod};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -42,6 +42,9 @@ pub struct AssistantConfig {
     /// Optional Claude model override (e.g. "haiku", "sonnet", "opus"). None uses Claude defaults.
     #[serde(default)]
     pub claude_model: Option<String>,
+    /// When enabled, generate an OpenSCAD→STL avatar mesh on each chat update (host-only).
+    #[serde(default)]
+    pub avatar_mesh_enabled: bool,
 }
 
 impl Default for AssistantConfig {
@@ -51,6 +54,7 @@ impl Default for AssistantConfig {
             codex_model: None,
             codex_reasoning_effort: None,
             claude_model: None,
+            avatar_mesh_enabled: true,
         }
     }
 }
@@ -155,7 +159,8 @@ pub async fn run_codex_structured(
                 "xhigh" => "xhigh",
                 _ => effort,
             };
-            cmd.arg("-c").arg(format!("model_reasoning_effort=\"{mapped}\""));
+            cmd.arg("-c")
+                .arg(format!("model_reasoning_effort=\"{mapped}\""));
         }
     }
     cmd.arg("--sandbox").arg("read-only");
@@ -190,7 +195,11 @@ pub async fn run_codex_structured(
     Ok(())
 }
 
-pub async fn run_claude_structured(prompt: &str, schema: &str, model: Option<&str>) -> Result<String> {
+pub async fn run_claude_structured(
+    prompt: &str,
+    schema: &str,
+    model: Option<&str>,
+) -> Result<String> {
     let mut cmd = Command::new("claude");
     cmd.arg("--print");
     cmd.arg("--output-format").arg("json");
@@ -244,11 +253,16 @@ fn load_companion_history(store: &WorldStore, profile_id: &str) -> Result<Vec<Co
         return Ok(Vec::new());
     }
     let data = std::fs::read_to_string(&path).with_context(|| format!("read {path:?}"))?;
-    let turns: Vec<CompanionTurn> = serde_json::from_str(&data).context("parse companion history")?;
+    let turns: Vec<CompanionTurn> =
+        serde_json::from_str(&data).context("parse companion history")?;
     Ok(turns)
 }
 
-fn save_companion_history(store: &WorldStore, profile_id: &str, turns: &[CompanionTurn]) -> Result<()> {
+fn save_companion_history(
+    store: &WorldStore,
+    profile_id: &str,
+    turns: &[CompanionTurn],
+) -> Result<()> {
     let path = companion_history_path(store, profile_id);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {parent:?}"))?;
@@ -357,6 +371,57 @@ pub async fn companion_chat(
     profile_id: &str,
     message: &str,
 ) -> Result<CompanionChatResponse> {
+    if cfg.avatar_mesh_enabled {
+        match crate::avatar_mesh::generate_avatar_mesh(store, cfg, profile_id, message).await {
+            Ok(avatar) => {
+                let reply = format!(
+                    "Updated—your avatar mesh is now **{}**. Tell me what to change next.",
+                    avatar.name
+                );
+
+                let mut history = load_companion_history(store, profile_id).unwrap_or_default();
+                history.push(CompanionTurn {
+                    role: "user".to_string(),
+                    content: message.trim().to_string(),
+                });
+                history.push(CompanionTurn {
+                    role: "assistant".to_string(),
+                    content: reply.clone(),
+                });
+                if history.len() > 80 {
+                    history = history.split_off(history.len().saturating_sub(80));
+                }
+                save_companion_history(store, profile_id, &history).ok();
+
+                return Ok(CompanionChatResponse {
+                    reply,
+                    avatar: Some(avatar),
+                });
+            }
+            Err(e) => {
+                // Fall back to the primitives/tag pipeline if mesh generation isn't available.
+                let mut out = companion_chat_primitives(store, cfg, profile_id, message).await?;
+                let msg = e.to_string();
+                if msg.contains("openscad not found") {
+                    out.reply = format!(
+                        "{}\n\nTip: install OpenSCAD to enable high-quality 3D avatar meshes.",
+                        out.reply
+                    );
+                }
+                return Ok(out);
+            }
+        }
+    }
+
+    companion_chat_primitives(store, cfg, profile_id, message).await
+}
+
+async fn companion_chat_primitives(
+    store: &WorldStore,
+    cfg: &AssistantConfig,
+    profile_id: &str,
+    message: &str,
+) -> Result<CompanionChatResponse> {
     let Some(provider) = cfg.provider else {
         anyhow::bail!("no provider configured");
     };
@@ -377,6 +442,7 @@ pub async fn companion_chat(
             height: 1.0,
             tags: vec!["default".to_string()],
             parts: Vec::new(),
+            mesh: None,
         });
     let current_avatar_json =
         serde_json::to_string_pretty(&current_avatar).context("serialize current avatar")?;
@@ -399,7 +465,11 @@ pub async fn companion_chat(
     prompt.push_str(&current_avatar_json);
     prompt.push_str("\n\nConversation:\n");
     for t in history.iter().rev().take(16).rev() {
-        let who = if t.role == "assistant" { "Assistant" } else { "User" };
+        let who = if t.role == "assistant" {
+            "Assistant"
+        } else {
+            "User"
+        };
         prompt.push_str(who);
         prompt.push_str(": ");
         prompt.push_str(&t.content);
@@ -549,11 +619,17 @@ fn ensure_parts_for_prompt(avatar: &mut AvatarSpecV1, message: &str) {
     }
 
     let wants_horns = msg.contains("horn") || msg.contains("antler") || wants_dragon || wants_demon;
-    let wants_glow = msg.contains("glow") || msg.contains("biolum") || msg.contains("neon") || wants_robot;
+    let wants_glow =
+        msg.contains("glow") || msg.contains("biolum") || msg.contains("neon") || wants_robot;
     let wants_tail = msg.contains("tail") || wants_animal || wants_dragon;
     let wants_wings = msg.contains("wing") || wants_dragon || wants_angel;
-    let wants_braids = msg.contains("braid") || msg.contains("dread") || msg.contains("hair") || wants_navi;
-    let wants_armor = msg.contains("armor") || msg.contains("armour") || msg.contains("shoulder") || wants_robot || wants_knight;
+    let wants_braids =
+        msg.contains("braid") || msg.contains("dread") || msg.contains("hair") || wants_navi;
+    let wants_armor = msg.contains("armor")
+        || msg.contains("armour")
+        || msg.contains("shoulder")
+        || wants_robot
+        || wants_knight;
     let wants_stripes = msg.contains("stripe") || msg.contains("pattern") || wants_robot;
 
     // "Prompt anything" friendly presets: map well-known fantasies to visible procedural parts.
@@ -963,20 +1039,46 @@ fn summarize_parts(parts: &[owp_protocol::AvatarPartV1]) -> String {
     let mut braids = 0;
     for p in parts {
         let id = p.id.to_lowercase();
-        if id.contains("horn") { horns += 1; }
-        if id.contains("stripe") { stripes += 1; }
-        if id.contains("wing") { wings += 1; }
-        if id.contains("tail") { tail += 1; }
-        if id.contains("shoulder") || id.contains("armor") { armor += 1; }
-        if id.contains("braid") { braids += 1; }
+        if id.contains("horn") {
+            horns += 1;
+        }
+        if id.contains("stripe") {
+            stripes += 1;
+        }
+        if id.contains("wing") {
+            wings += 1;
+        }
+        if id.contains("tail") {
+            tail += 1;
+        }
+        if id.contains("shoulder") || id.contains("armor") {
+            armor += 1;
+        }
+        if id.contains("braid") {
+            braids += 1;
+        }
     }
     let mut out = Vec::new();
-    if horns > 0 { out.push(format!("{horns} horns")); }
-    if stripes > 0 { out.push(format!("{stripes} glow stripes")); }
-    if wings > 0 { out.push(format!("{wings} wings")); }
-    if tail > 0 { out.push("tail".to_string()); }
-    if armor > 0 { out.push("shoulder armor".to_string()); }
-    if braids > 0 { out.push(format!("{braids} braids")); }
-    if out.is_empty() { out.push(format!("{} parts", parts.len())); }
+    if horns > 0 {
+        out.push(format!("{horns} horns"));
+    }
+    if stripes > 0 {
+        out.push(format!("{stripes} glow stripes"));
+    }
+    if wings > 0 {
+        out.push(format!("{wings} wings"));
+    }
+    if tail > 0 {
+        out.push("tail".to_string());
+    }
+    if armor > 0 {
+        out.push("shoulder armor".to_string());
+    }
+    if braids > 0 {
+        out.push(format!("{braids} braids"));
+    }
+    if out.is_empty() {
+        out.push(format!("{} parts", parts.len()));
+    }
     out.join(", ")
 }

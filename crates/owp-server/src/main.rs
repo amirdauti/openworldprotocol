@@ -4,6 +4,7 @@ use tracing_subscriber::EnvFilter;
 
 mod assistant;
 mod avatar;
+mod avatar_mesh;
 mod storage;
 mod tcp_game;
 mod web_admin;

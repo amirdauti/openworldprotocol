@@ -13,6 +13,7 @@ Project status: early scaffolding. Track progress in `STATUS.md`.
 
 - `apps/owp-unity/` — Unity client (OWP Client)
   - Universe map (“planets”), connect by address, chunk/entity streaming, basic gameplay loop + chat/UI hooks
+  - Avatar “prompt anything” (hybrid): Codex/Claude generates OpenSCAD → server renders STL → Unity displays mesh (requires `openscad` installed)
 - `crates/owp-server/` — Rust local world server (OWP World)
   - Simulation + persistence + networking; runs generation jobs (Claude/Codex) inside a world workspace directory
 - `crates/owp-protocol/` — Protocol types + encoding/decoding shared by client/server
