@@ -47,6 +47,7 @@ public class OwpBootstrap : MonoBehaviour
 
     private Process _serverProcess;
     private GameObject _avatarSceneRoot;
+    private Transform _avatarHoloRing;
     private GameObject _avatarRoot;
     private Transform _avatarBody;
     private Transform _avatarHead;
@@ -143,6 +144,14 @@ public class OwpBootstrap : MonoBehaviour
         CreateUi();
 
         StartCoroutine(BootSequence());
+    }
+
+    private void Update()
+    {
+        if (_avatarHoloRing != null)
+        {
+            _avatarHoloRing.Rotate(0f, 0f, 22f * Time.deltaTime, Space.Self);
+        }
     }
 
 #if UNITY_EDITOR
@@ -2001,16 +2010,73 @@ public class OwpBootstrap : MonoBehaviour
         if (_avatarSceneRoot != null) return;
 
         EnsureStarterMeshes();
+        EnsureGltfCacheRoot();
 
         _avatarSceneRoot = new GameObject("OWP_AvatarShowcase");
         DontDestroyOnLoad(_avatarSceneRoot);
+
+        // Avatar-leaning render settings (overwritten when a world plan is applied).
+        var skyShader = Shader.Find("Skybox/Procedural");
+        if (skyShader != null)
+        {
+            var sky = new Material(skyShader);
+            sky.SetColor("_SkyTint", new Color(0.10f, 0.18f, 0.28f, 1f));
+            sky.SetColor("_GroundColor", new Color(0.03f, 0.04f, 0.06f, 1f));
+            sky.SetFloat("_AtmosphereThickness", 1.6f);
+            sky.SetFloat("_SunSize", 0.04f);
+            RenderSettings.skybox = sky;
+        }
+        RenderSettings.fog = true;
+        RenderSettings.fogColor = new Color(0.03f, 0.05f, 0.08f, 1f);
+        RenderSettings.fogDensity = 0.0105f;
+        RenderSettings.ambientLight = new Color(0.12f, 0.16f, 0.22f, 1f);
+        RenderSettings.ambientIntensity = 1.2f;
+
+        // Lighting
+        var dir = FindObjectsOfType<Light>();
+        Light dirLight = null;
+        foreach (var l in dir)
+        {
+            if (l != null && l.type == LightType.Directional)
+            {
+                dirLight = l;
+                break;
+            }
+        }
+        if (dirLight == null)
+        {
+            var lightGo = new GameObject("Directional Light");
+            dirLight = lightGo.AddComponent<Light>();
+            dirLight.type = LightType.Directional;
+        }
+        dirLight.color = new Color(0.75f, 0.88f, 1.0f, 1f);
+        dirLight.intensity = 1.15f;
+        dirLight.transform.rotation = Quaternion.Euler(50f, -35f, 0f);
+
+        var rim = new GameObject("AvatarRimLight");
+        rim.transform.SetParent(_avatarSceneRoot.transform, false);
+        rim.transform.position = new Vector3(0.0f, 2.2f, 3.8f);
+        var rimLight = rim.AddComponent<Light>();
+        rimLight.type = LightType.Point;
+        rimLight.range = 12f;
+        rimLight.intensity = 1.8f;
+        rimLight.color = new Color(0.35f, 0.95f, 0.85f, 1f);
+
+        var magenta = new GameObject("AvatarAccentLight");
+        magenta.transform.SetParent(_avatarSceneRoot.transform, false);
+        magenta.transform.position = new Vector3(-3.2f, 1.8f, -1.8f);
+        var magentaLight = magenta.AddComponent<Light>();
+        magentaLight.type = LightType.Point;
+        magentaLight.range = 10f;
+        magentaLight.intensity = 1.4f;
+        magentaLight.color = new Color(0.75f, 0.35f, 1.0f, 1f);
 
         // Platform
         var platform = GameObject.CreatePrimitive(PrimitiveType.Cube);
         platform.name = "Platform";
         platform.transform.SetParent(_avatarSceneRoot.transform, false);
         platform.transform.position = new Vector3(0f, -0.05f, 0f);
-        platform.transform.localScale = new Vector3(8f, 0.1f, 8f);
+        platform.transform.localScale = new Vector3(10f, 0.1f, 10f);
         RemoveCollider(platform);
 
         var platformMat = new Material(Shader.Find("Standard"));
@@ -2030,8 +2096,8 @@ public class OwpBootstrap : MonoBehaviour
         var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
         wall.name = "Backdrop";
         wall.transform.SetParent(_avatarSceneRoot.transform, false);
-        wall.transform.position = new Vector3(0f, 2.2f, 6.0f);
-        wall.transform.localScale = new Vector3(12f, 5f, 0.2f);
+        wall.transform.position = new Vector3(0f, 2.6f, 9.5f);
+        wall.transform.localScale = new Vector3(16f, 6f, 0.2f);
         RemoveCollider(wall);
         var wr = wall.GetComponent<Renderer>();
         if (wr != null)
@@ -2053,6 +2119,7 @@ public class OwpBootstrap : MonoBehaviour
         ring.transform.position = new Vector3(0f, 0.02f, 0f);
         ring.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
         ring.transform.localScale = new Vector3(2.8f, 2.8f, 0.22f);
+        _avatarHoloRing = ring.transform;
         var ringMf = ring.AddComponent<MeshFilter>();
         ringMf.sharedMesh = _meshTorus;
         var ringMr = ring.AddComponent<MeshRenderer>();
@@ -2061,6 +2128,22 @@ public class OwpBootstrap : MonoBehaviour
         ringMat.EnableKeyword("_EMISSION");
         ringMat.SetColor("_EmissionColor", new Color(0.35f, 0.95f, 0.85f, 1f) * 2.0f);
         ringMr.material = ringMat;
+
+        // CC0 props (Kenney pack) — makes the avatar stage look like a real scene without LLM mesh generation.
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "lampRoundFloor", new Vector3(-2.6f, 0f, 1.8f), new Vector3(0f, 30f, 0f), Vector3.one * 0.95f);
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "lampRoundFloor", new Vector3(2.6f, 0f, 1.8f), new Vector3(0f, -30f, 0f), Vector3.one * 0.95f);
+
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "rock_crystalsLargeA", new Vector3(-3.4f, 0f, 5.2f), new Vector3(0f, 10f, 0f), Vector3.one * 1.1f);
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "rock_crystalsLargeB", new Vector3(3.2f, 0f, 5.6f), new Vector3(0f, -20f, 0f), Vector3.one * 1.15f);
+
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "barrels", new Vector3(2.1f, 0f, -1.4f), new Vector3(0f, 45f, 0f), Vector3.one * 1.0f);
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "barrel", new Vector3(-1.9f, 0f, -1.2f), new Vector3(0f, -30f, 0f), Vector3.one * 1.0f);
+
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "astronautA", new Vector3(-3.6f, 0f, 2.1f), new Vector3(0f, 90f, 0f), Vector3.one * 1.05f);
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "alien", new Vector3(3.6f, 0f, 2.2f), new Vector3(0f, -90f, 0f), Vector3.one * 1.05f);
+
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "van", new Vector3(-4.0f, 0f, 7.0f), new Vector3(0f, 25f, 0f), Vector3.one * 1.1f);
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "ambulance", new Vector3(4.2f, 0f, 7.2f), new Vector3(0f, -25f, 0f), Vector3.one * 1.1f);
 
         // Accent pylons
         for (int i = 0; i < 4; i++)
@@ -2094,6 +2177,26 @@ public class OwpBootstrap : MonoBehaviour
             var cr = cap.GetComponent<Renderer>();
             if (cr != null) cr.material = capMat;
         }
+
+        // Camera framing
+        var cam = Camera.main;
+        if (cam != null)
+        {
+            cam.fieldOfView = 40f;
+            cam.transform.position = new Vector3(0.9f, 1.55f, -4.2f);
+            cam.transform.LookAt(new Vector3(0f, 1.15f, 0f));
+        }
+    }
+
+    private GameObject CreateKenneyPropHolder(Transform parent, string assetName, Vector3 localPos, Vector3 localEuler, Vector3 holderScale)
+    {
+        var holder = new GameObject("Kenney_" + assetName);
+        holder.transform.SetParent(parent, false);
+        holder.transform.localPosition = localPos;
+        holder.transform.localRotation = Quaternion.Euler(localEuler);
+        holder.transform.localScale = holderScale;
+        StartCoroutine(InstantiateKenneyAssetInto(holder.transform, assetName));
+        return holder;
     }
 
     private void ApplyWorldPlan(WorldPlan plan)
