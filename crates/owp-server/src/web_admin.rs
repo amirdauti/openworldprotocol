@@ -186,6 +186,100 @@ async fn assistant_status(
     Ok(Json(status))
 }
 
+#[derive(Debug, Serialize)]
+struct AssistantConfigResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    codex_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    codex_reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    claude_model: Option<String>,
+}
+
+async fn get_assistant_config(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<AssistantConfigResponse>, StatusCode> {
+    require_auth(&headers, &st.auth)?;
+    let cfg = assistant::load_config(&st.store).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(AssistantConfigResponse {
+        provider: cfg.provider.map(|p| p.as_str().to_string()),
+        codex_model: cfg.codex_model,
+        codex_reasoning_effort: cfg.codex_reasoning_effort,
+        claude_model: cfg.claude_model,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SetAssistantConfigRequest {
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    codex_model: Option<String>,
+    #[serde(default)]
+    codex_reasoning_effort: Option<String>,
+    #[serde(default)]
+    claude_model: Option<String>,
+}
+
+fn normalize_optional_string(v: Option<String>) -> Option<String> {
+    v.and_then(|s| {
+        let t = s.trim().to_string();
+        if t.is_empty() || t == "default" {
+            None
+        } else {
+            Some(t)
+        }
+    })
+}
+
+async fn set_assistant_config(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<SetAssistantConfigRequest>,
+) -> Result<Json<AssistantConfigResponse>, StatusCode> {
+    require_auth(&headers, &st.auth)?;
+
+    let mut cfg = assistant::load_config(&st.store).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if let Some(p) = req.provider {
+        cfg.provider = match p.as_str() {
+            "" => None,
+            "codex" => Some(AssistantProviderId::Codex),
+            "claude" => Some(AssistantProviderId::Claude),
+            _ => return Err(StatusCode::BAD_REQUEST),
+        };
+    }
+
+    if req.codex_model.is_some() {
+        cfg.codex_model = normalize_optional_string(req.codex_model);
+    }
+    if req.codex_reasoning_effort.is_some() {
+        let v = normalize_optional_string(req.codex_reasoning_effort);
+        if let Some(ref e) = v {
+            match e.as_str() {
+                "low" | "medium" | "high" | "very_high" => {}
+                _ => return Err(StatusCode::BAD_REQUEST),
+            }
+        }
+        cfg.codex_reasoning_effort = v;
+    }
+    if req.claude_model.is_some() {
+        cfg.claude_model = normalize_optional_string(req.claude_model);
+    }
+
+    assistant::save_config(&st.store, &cfg).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(AssistantConfigResponse {
+        provider: cfg.provider.map(|p| p.as_str().to_string()),
+        codex_model: cfg.codex_model,
+        codex_reasoning_effort: cfg.codex_reasoning_effort,
+        claude_model: cfg.claude_model,
+    }))
+}
+
 #[derive(Debug, Deserialize)]
 struct SetProviderRequest {
     provider: String,
@@ -233,12 +327,12 @@ async fn assistant_chat(
     require_auth(&headers, &st.auth)?;
 
     let cfg = assistant::load_config(&st.store).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let Some(provider) = cfg.provider else {
+    if cfg.provider.is_none() {
         return Err(StatusCode::PRECONDITION_FAILED);
     };
 
     let profile_id = req.profile_id.as_deref().unwrap_or("local");
-    let out = assistant::companion_chat(&st.store, provider, profile_id, &req.message)
+    let out = assistant::companion_chat(&st.store, &cfg, profile_id, &req.message)
         .await
         .map_err(|e| {
             error!("assistant chat failed: {e:#}");
@@ -281,11 +375,11 @@ async fn generate_avatar(
     require_auth(&headers, &st.auth)?;
 
     let cfg = assistant::load_config(&st.store).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let Some(provider) = cfg.provider else {
+    if cfg.provider.is_none() {
         return Err(StatusCode::PRECONDITION_FAILED);
     };
 
-    let avatar = avatar_mod::generate_avatar(&st.store, provider, &req.prompt)
+    let avatar = avatar_mod::generate_avatar(&st.store, &cfg, &req.prompt)
         .await
         .map_err(|e| {
             error!("avatar generation failed: {e:#}");
@@ -318,6 +412,7 @@ pub async fn serve(
         .route("/health", get(health))
         .route("/assistant/status", get(assistant_status))
         .route("/assistant/provider", post(set_provider))
+        .route("/assistant/config", get(get_assistant_config).post(set_assistant_config))
         .route("/assistant/chat", post(assistant_chat))
         .route("/avatar", get(get_avatar))
         .route("/avatar/generate", post(generate_avatar))

@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
 
-use crate::assistant::{run_claude_structured, run_codex_structured, AssistantProviderId};
+use crate::assistant::{run_claude_structured, run_codex_structured, AssistantConfig, AssistantProviderId};
 use crate::storage::WorldStore;
 
 pub const AVATAR_SCHEMA_JSON: &str = r#"{
@@ -48,9 +48,13 @@ pub fn save_avatar(store: &WorldStore, profile_id: &str, avatar: &AvatarSpecV1) 
 
 pub async fn generate_avatar(
     store: &WorldStore,
-    provider: AssistantProviderId,
+    cfg: &AssistantConfig,
     user_prompt: &str,
 ) -> Result<AvatarSpecV1> {
+    let Some(provider) = cfg.provider else {
+        anyhow::bail!("no provider configured");
+    };
+
     let system_prompt = format!(
         "You are the OWP avatar generator.\n\
 Return ONLY a JSON object matching the provided schema.\n\
@@ -75,12 +79,14 @@ Constraints:\n\
                 schema_file.path(),
                 output_file.path(),
                 Some(store.root_dir()),
+                cfg.codex_model.as_deref(),
+                cfg.codex_reasoning_effort.as_deref(),
             )
             .await?;
             std::fs::read_to_string(output_file.path()).context("read codex output")?
         }
         AssistantProviderId::Claude => {
-            let raw = run_claude_structured(&system_prompt, AVATAR_SCHEMA_JSON).await?;
+            let raw = run_claude_structured(&system_prompt, AVATAR_SCHEMA_JSON, cfg.claude_model.as_deref()).await?;
             let v: Value = serde_json::from_str(&raw).context("parse claude result wrapper")?;
             if let Some(so) = v.get("structured_output") {
                 serde_json::to_string(so).context("serialize structured_output")?

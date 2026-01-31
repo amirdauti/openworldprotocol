@@ -33,11 +33,25 @@ impl AssistantProviderId {
 pub struct AssistantConfig {
     #[serde(default)]
     pub provider: Option<AssistantProviderId>,
+    /// Optional Codex model override (e.g. "gpt-4.1"). None uses Codex CLI defaults/config.
+    #[serde(default)]
+    pub codex_model: Option<String>,
+    /// One of: low, medium, high, very_high. None uses Codex CLI defaults/config.
+    #[serde(default)]
+    pub codex_reasoning_effort: Option<String>,
+    /// Optional Claude model override (e.g. "haiku", "sonnet", "opus"). None uses Claude defaults.
+    #[serde(default)]
+    pub claude_model: Option<String>,
 }
 
 impl Default for AssistantConfig {
     fn default() -> Self {
-        Self { provider: None }
+        Self {
+            provider: None,
+            codex_model: None,
+            codex_reasoning_effort: None,
+            claude_model: None,
+        }
     }
 }
 
@@ -118,9 +132,31 @@ pub async fn run_codex_structured(
     schema_path: &Path,
     output_path: &Path,
     cwd: Option<&Path>,
+    model: Option<&str>,
+    reasoning_effort: Option<&str>,
 ) -> Result<()> {
     let mut cmd = Command::new("codex");
     cmd.arg("exec");
+    if let Some(model) = model {
+        if !model.trim().is_empty() {
+            cmd.arg("--model").arg(model.trim());
+        }
+    }
+    if let Some(effort) = reasoning_effort {
+        let effort = effort.trim();
+        if !effort.is_empty() {
+            // Codex supports config overrides via `-c key=value` where value is parsed as TOML.
+            // We map very_high -> high for compatibility with common effort enums.
+            let mapped = match effort {
+                "low" => "low",
+                "medium" => "medium",
+                "high" => "high",
+                "very_high" => "high",
+                _ => effort,
+            };
+            cmd.arg("-c").arg(format!("reasoning.effort=\"{mapped}\""));
+        }
+    }
     cmd.arg("--sandbox").arg("read-only");
     cmd.arg("--skip-git-repo-check");
     cmd.arg("--output-schema").arg(schema_path);
@@ -153,11 +189,16 @@ pub async fn run_codex_structured(
     Ok(())
 }
 
-pub async fn run_claude_structured(prompt: &str, schema: &str) -> Result<String> {
+pub async fn run_claude_structured(prompt: &str, schema: &str, model: Option<&str>) -> Result<String> {
     let mut cmd = Command::new("claude");
     cmd.arg("--print");
     cmd.arg("--output-format").arg("json");
     cmd.arg("--json-schema").arg(schema);
+    if let Some(model) = model {
+        if !model.trim().is_empty() {
+            cmd.arg("--model").arg(model.trim());
+        }
+    }
     cmd.arg(prompt);
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
@@ -291,10 +332,14 @@ fn companion_schema_json() -> String {
 
 pub async fn companion_chat(
     store: &WorldStore,
-    provider: AssistantProviderId,
+    cfg: &AssistantConfig,
     profile_id: &str,
     message: &str,
 ) -> Result<CompanionChatResponse> {
+    let Some(provider) = cfg.provider else {
+        anyhow::bail!("no provider configured");
+    };
+
     let mut history = load_companion_history(store, profile_id).unwrap_or_default();
     // keep history bounded
     if history.len() > 50 {
@@ -349,12 +394,14 @@ pub async fn companion_chat(
                 schema_file.path(),
                 output_file.path(),
                 Some(store.root_dir()),
+                cfg.codex_model.as_deref(),
+                cfg.codex_reasoning_effort.as_deref(),
             )
             .await?;
             std::fs::read_to_string(output_file.path()).context("read codex output")?
         }
         AssistantProviderId::Claude => {
-            let raw = run_claude_structured(&prompt, &schema).await?;
+            let raw = run_claude_structured(&prompt, &schema, cfg.claude_model.as_deref()).await?;
             let v: Value = serde_json::from_str(&raw).context("parse claude result wrapper")?;
             if let Some(so) = v.get("structured_output") {
                 serde_json::to_string(so).context("serialize structured_output")?

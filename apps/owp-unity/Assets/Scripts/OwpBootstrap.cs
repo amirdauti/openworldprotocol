@@ -17,9 +17,13 @@ public class OwpBootstrap : MonoBehaviour
     private static Font _defaultFont;
     private static OwpBootstrap _instance;
 
-#if UNITY_EDITOR
-    private static bool _editorHooksInstalled;
-#endif
+	#if UNITY_EDITOR
+	    private static bool _editorHooksInstalled;
+	#endif
+
+	    private static readonly string[] CodexModelOptions = { "default", "gpt-4.1", "gpt-4.1-mini", "o3-mini" };
+	    private static readonly string[] CodexEffortOptions = { "low", "medium", "high", "very_high" };
+	    private static readonly string[] ClaudeModelOptions = { "default", "haiku", "sonnet", "opus" };
 
     private Process _serverProcess;
     private GameObject _avatarRoot;
@@ -51,9 +55,19 @@ public class OwpBootstrap : MonoBehaviour
     private string _selectedWorldId;
     private int _selectedWorldPort;
 
-    private GameObject _providerPanel;
-    private Button _useCodexButton;
-    private Button _useClaudeButton;
+	    private GameObject _providerPanel;
+	    private Button _useCodexButton;
+	    private Button _useClaudeButton;
+	    private Button _codexModelButton;
+	    private Text _codexModelLabel;
+	    private Button _codexEffortButton;
+	    private Text _codexEffortLabel;
+	    private Button _claudeModelButton;
+	    private Text _claudeModelLabel;
+
+	    private string _codexModel = "default";
+	    private string _codexEffort = "medium";
+	    private string _claudeModel = "default";
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     public static void Init()
@@ -95,11 +109,12 @@ public class OwpBootstrap : MonoBehaviour
     }
 #endif
 
-    private IEnumerator BootSequence()
-    {
-        yield return StartCoroutine(EnsureServerRunning());
-        yield return StartCoroutine(RefreshAssistantStatus());
-        yield return StartCoroutine(RefreshWorlds());
+	    private IEnumerator BootSequence()
+	    {
+	        yield return StartCoroutine(EnsureServerRunning());
+	        yield return StartCoroutine(RefreshAssistantStatus());
+	        yield return StartCoroutine(RefreshAssistantConfig());
+	        yield return StartCoroutine(RefreshWorlds());
 
         AppendLog("Companion: Hi. I can help create/edit your avatar and worlds.");
         AppendLog("Companion: Choose Codex or Claude the first time, then describe the avatar you want.");
@@ -269,12 +284,86 @@ public class OwpBootstrap : MonoBehaviour
             UpdateProviderButtons(status);
             AppendLog("Assistant: choose Codex or Claude.");
         }
-        else
-        {
-            _providerPanel.SetActive(false);
-            AppendLog($"Assistant: provider set to {provider}.");
-        }
-    }
+	        else
+	        {
+	            _providerPanel.SetActive(false);
+	            AppendLog($"Assistant: provider set to {provider}.");
+	        }
+	    }
+
+	    private IEnumerator RefreshAssistantConfig()
+	    {
+	        var task = HttpRequestAsync("GET", $"{AdminBaseUrl}/assistant/config", null, 5);
+	        yield return new WaitUntil(() => task.IsCompleted);
+
+	        if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok)
+	        {
+	            // Older servers won't have this endpoint; keep defaults.
+	            UpdateAssistantSettingsUi();
+	            yield break;
+	        }
+
+	        var cfg = JsonUtility.FromJson<AssistantConfigResponse>(task.Result.text);
+	        if (cfg == null)
+	        {
+	            UpdateAssistantSettingsUi();
+	            yield break;
+	        }
+
+	        _codexModel = string.IsNullOrEmpty(cfg.codex_model) ? "default" : cfg.codex_model;
+	        _claudeModel = string.IsNullOrEmpty(cfg.claude_model) ? "default" : cfg.claude_model;
+	        _codexEffort = string.IsNullOrEmpty(cfg.codex_reasoning_effort) ? "medium" : cfg.codex_reasoning_effort;
+
+	        UpdateAssistantSettingsUi();
+	    }
+
+	    private IEnumerator SaveAssistantConfig()
+	    {
+	        var json =
+	            "{"
+	            + "\"codex_model\":" + JsonEscape(_codexModel)
+	            + ",\"codex_reasoning_effort\":" + JsonEscape(_codexEffort)
+	            + ",\"claude_model\":" + JsonEscape(_claudeModel)
+	            + "}";
+
+	        var task = HttpRequestAsync("POST", $"{AdminBaseUrl}/assistant/config", json, 10);
+	        yield return new WaitUntil(() => task.IsCompleted);
+
+	        if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok)
+	        {
+	            AppendLog("Assistant: failed to save settings.");
+	            yield break;
+	        }
+
+	        var cfg = JsonUtility.FromJson<AssistantConfigResponse>(task.Result.text);
+	        if (cfg != null)
+	        {
+	            _codexModel = string.IsNullOrEmpty(cfg.codex_model) ? "default" : cfg.codex_model;
+	            _claudeModel = string.IsNullOrEmpty(cfg.claude_model) ? "default" : cfg.claude_model;
+	            _codexEffort = string.IsNullOrEmpty(cfg.codex_reasoning_effort) ? "medium" : cfg.codex_reasoning_effort;
+	        }
+
+	        UpdateAssistantSettingsUi();
+	    }
+
+	    private void UpdateAssistantSettingsUi()
+	    {
+	        if (_codexModelLabel != null) _codexModelLabel.text = $"Codex model: {_codexModel}";
+	        if (_codexEffortLabel != null) _codexEffortLabel.text = $"Effort: {_codexEffort}";
+	        if (_claudeModelLabel != null) _claudeModelLabel.text = $"Claude model: {_claudeModel}";
+	    }
+
+	    private static string CycleOption(string current, string[] options)
+	    {
+	        if (options == null || options.Length == 0) return current;
+	        int idx = 0;
+	        for (int i = 0; i < options.Length; i++)
+	        {
+	            if (options[i] == current) { idx = i; break; }
+	        }
+	        idx = (idx + 1) % options.Length;
+	        return options[idx];
+	    }
 
     private static bool IsProviderInstalled(AssistantStatus status, string provider)
     {
@@ -972,27 +1061,57 @@ public class OwpBootstrap : MonoBehaviour
         _providerPanel.transform.SetParent(canvasGo.transform, false);
         var pimg = _providerPanel.AddComponent<Image>();
         pimg.color = new Color(0, 0, 0, 0.85f);
-        var prt = _providerPanel.GetComponent<RectTransform>();
-        prt.anchorMin = new Vector2(0.5f, 0.5f);
-        prt.anchorMax = new Vector2(0.5f, 0.5f);
-        prt.pivot = new Vector2(0.5f, 0.5f);
-        prt.sizeDelta = new Vector2(420, 160);
-        prt.anchoredPosition = Vector2.zero;
+	        var prt = _providerPanel.GetComponent<RectTransform>();
+	        prt.anchorMin = new Vector2(0.5f, 0.5f);
+	        prt.anchorMax = new Vector2(0.5f, 0.5f);
+	        prt.pivot = new Vector2(0.5f, 0.5f);
+	        prt.sizeDelta = new Vector2(560, 260);
+	        prt.anchoredPosition = Vector2.zero;
 
-        var providerTitle = CreateText(_providerPanel.transform, "ProviderTitle", "Choose provider", new Vector2(-10, -20), new Vector2(400, 40));
-        providerTitle.alignment = TextAnchor.MiddleCenter;
-        providerTitle.fontSize = 20;
+	        var providerTitle = CreateText(_providerPanel.transform, "ProviderTitle", "Choose provider", new Vector2(-10, -20), new Vector2(540, 40));
+	        providerTitle.alignment = TextAnchor.MiddleCenter;
+	        providerTitle.fontSize = 20;
 
-        _useCodexButton = CreateButton(_providerPanel.transform, "UseCodex", "Use Codex", new Vector2(-220, -80), new Vector2(180, 44));
-        _useClaudeButton = CreateButton(_providerPanel.transform, "UseClaude", "Use Claude", new Vector2(-20, -80), new Vector2(180, 44));
+	        _useCodexButton = CreateButton(_providerPanel.transform, "UseCodex", "Use Codex", new Vector2(-300, -80), new Vector2(240, 44));
+	        _useClaudeButton = CreateButton(_providerPanel.transform, "UseClaude", "Use Claude", new Vector2(-20, -80), new Vector2(240, 44));
 
-        _useCodexButton.onClick.AddListener(() => StartCoroutine(SetProvider("codex")));
-        _useClaudeButton.onClick.AddListener(() => StartCoroutine(SetProvider("claude")));
+	        _useCodexButton.onClick.AddListener(() => StartCoroutine(SetProvider("codex")));
+	        _useClaudeButton.onClick.AddListener(() => StartCoroutine(SetProvider("claude")));
 
-        _providerPanel.SetActive(false);
+	        var settingsTitle = CreateText(_providerPanel.transform, "SettingsTitle", "Model + Reasoning", new Vector2(-10, -130), new Vector2(540, 26));
+	        settingsTitle.alignment = TextAnchor.MiddleLeft;
 
-        SetWorldsSource(false);
-    }
+	        _codexModelButton = CreateButton(_providerPanel.transform, "CodexModel", "Codex model: default", new Vector2(-300, -160), new Vector2(240, 34));
+	        _codexModelLabel = _codexModelButton.GetComponentInChildren<Text>();
+	        _codexModelButton.onClick.AddListener(() =>
+	        {
+	            _codexModel = CycleOption(_codexModel, CodexModelOptions);
+	            UpdateAssistantSettingsUi();
+	            StartCoroutine(SaveAssistantConfig());
+	        });
+
+	        _codexEffortButton = CreateButton(_providerPanel.transform, "CodexEffort", "Effort: medium", new Vector2(-20, -160), new Vector2(240, 34));
+	        _codexEffortLabel = _codexEffortButton.GetComponentInChildren<Text>();
+	        _codexEffortButton.onClick.AddListener(() =>
+	        {
+	            _codexEffort = CycleOption(_codexEffort, CodexEffortOptions);
+	            UpdateAssistantSettingsUi();
+	            StartCoroutine(SaveAssistantConfig());
+	        });
+
+	        _claudeModelButton = CreateButton(_providerPanel.transform, "ClaudeModel", "Claude model: default", new Vector2(-20, -205), new Vector2(520, 34));
+	        _claudeModelLabel = _claudeModelButton.GetComponentInChildren<Text>();
+	        _claudeModelButton.onClick.AddListener(() =>
+	        {
+	            _claudeModel = CycleOption(_claudeModel, ClaudeModelOptions);
+	            UpdateAssistantSettingsUi();
+	            StartCoroutine(SaveAssistantConfig());
+	        });
+
+	        _providerPanel.SetActive(false);
+
+	        SetWorldsSource(false);
+	    }
 
     private static GameObject CreatePanel(Transform parent, string name, Color bg)
     {
@@ -1427,13 +1546,22 @@ public class OwpBootstrap : MonoBehaviour
         public ProviderStatus[] providers;
     }
 
-    [Serializable]
-    private class ProviderStatus
-    {
-        public string id;
-        public bool installed;
-        public string note;
-    }
+	    [Serializable]
+	    private class ProviderStatus
+	    {
+	        public string id;
+	        public bool installed;
+	        public string note;
+	    }
+
+	    [Serializable]
+	    private class AssistantConfigResponse
+	    {
+	        public string provider;
+	        public string codex_model;
+	        public string codex_reasoning_effort;
+	        public string claude_model;
+	    }
 
 	    [Serializable]
 	    private class AssistantChatResponse
