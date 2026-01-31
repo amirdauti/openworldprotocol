@@ -21,7 +21,25 @@ public class OwpBootstrap : MonoBehaviour
 	    private static bool _editorHooksInstalled;
 	#endif
 
-	    private static readonly string[] CodexModelOptions = { "default", "gpt-4.1", "gpt-4.1-mini", "o3-mini" };
+	    // Model options are "best effort" presets; users can still type arbitrary prompts.
+	    // Keep these aligned with Codex CLI docs (models may vary by account).
+	    private static readonly string[] CodexModelOptions =
+	    {
+	        "default",
+	        "gpt-5.2",
+	        "gpt-5.2-codex",
+	        "gpt-5.1",
+	        "gpt-5.1-codex",
+	        "gpt-5.1-codex-mini",
+	        "gpt-5.1-codex-max",
+	        "gpt-5",
+	        "gpt-5-codex",
+	        "gpt-5-codex-mini",
+	        // Older/alt models (may or may not be enabled)
+	        "gpt-4.1",
+	        "gpt-4.1-mini",
+	        "o3-mini",
+	    };
 	    private static readonly string[] CodexEffortOptions = { "low", "medium", "high", "very_high" };
 	    private static readonly string[] ClaudeModelOptions = { "default", "haiku", "sonnet", "opus" };
 
@@ -313,6 +331,7 @@ public class OwpBootstrap : MonoBehaviour
 	        _codexModel = string.IsNullOrEmpty(cfg.codex_model) ? "default" : cfg.codex_model;
 	        _claudeModel = string.IsNullOrEmpty(cfg.claude_model) ? "default" : cfg.claude_model;
 	        _codexEffort = string.IsNullOrEmpty(cfg.codex_reasoning_effort) ? "medium" : cfg.codex_reasoning_effort;
+	        if (_codexEffort == "xhigh") _codexEffort = "very_high";
 
 	        UpdateAssistantSettingsUi();
 	    }
@@ -341,6 +360,7 @@ public class OwpBootstrap : MonoBehaviour
 	            _codexModel = string.IsNullOrEmpty(cfg.codex_model) ? "default" : cfg.codex_model;
 	            _claudeModel = string.IsNullOrEmpty(cfg.claude_model) ? "default" : cfg.claude_model;
 	            _codexEffort = string.IsNullOrEmpty(cfg.codex_reasoning_effort) ? "medium" : cfg.codex_reasoning_effort;
+	            if (_codexEffort == "xhigh") _codexEffort = "very_high";
 	        }
 
 	        UpdateAssistantSettingsUi();
@@ -349,7 +369,9 @@ public class OwpBootstrap : MonoBehaviour
 	    private void UpdateAssistantSettingsUi()
 	    {
 	        if (_codexModelLabel != null) _codexModelLabel.text = $"Codex model: {_codexModel}";
-	        if (_codexEffortLabel != null) _codexEffortLabel.text = $"Effort: {_codexEffort}";
+	        // Server stores Codex effort as "xhigh" but UI uses "very_high".
+	        var effortLabel = _codexEffort == "xhigh" ? "very_high" : _codexEffort;
+	        if (_codexEffortLabel != null) _codexEffortLabel.text = $"Effort: {effortLabel}";
 	        if (_claudeModelLabel != null) _claudeModelLabel.text = $"Claude model: {_claudeModel}";
 	    }
 

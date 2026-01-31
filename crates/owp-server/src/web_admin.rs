@@ -260,11 +260,11 @@ async fn set_assistant_config(
         let v = normalize_optional_string(req.codex_reasoning_effort);
         if let Some(ref e) = v {
             match e.as_str() {
-                "low" | "medium" | "high" | "very_high" => {}
+                "low" | "medium" | "high" | "very_high" | "xhigh" => {}
                 _ => return Err(StatusCode::BAD_REQUEST),
             }
         }
-        cfg.codex_reasoning_effort = v;
+        cfg.codex_reasoning_effort = v.map(|e| if e == "very_high" { "xhigh".to_string() } else { e });
     }
     if req.claude_model.is_some() {
         cfg.claude_model = normalize_optional_string(req.claude_model);

@@ -146,15 +146,16 @@ pub async fn run_codex_structured(
         let effort = effort.trim();
         if !effort.is_empty() {
             // Codex supports config overrides via `-c key=value` where value is parsed as TOML.
-            // We map very_high -> high for compatibility with common effort enums.
+            // Map very_high -> xhigh (Codex uses "xhigh" per docs/changelog).
             let mapped = match effort {
                 "low" => "low",
                 "medium" => "medium",
                 "high" => "high",
-                "very_high" => "high",
+                "very_high" => "xhigh",
+                "xhigh" => "xhigh",
                 _ => effort,
             };
-            cmd.arg("-c").arg(format!("reasoning.effort=\"{mapped}\""));
+            cmd.arg("-c").arg(format!("model_reasoning_effort=\"{mapped}\""));
         }
     }
     cmd.arg("--sandbox").arg("read-only");
