@@ -4,7 +4,9 @@ use serde_json::Value;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
 
-use crate::assistant::{run_claude_structured, run_codex_structured, AssistantConfig, AssistantProviderId};
+use crate::assistant::{
+    run_claude_structured, run_codex_structured, AssistantConfig, AssistantProviderId,
+};
 use crate::storage::WorldStore;
 
 pub const AVATAR_SCHEMA_JSON: &str = r#"{
@@ -112,7 +114,12 @@ Constraints:\n\
             std::fs::read_to_string(output_file.path()).context("read codex output")?
         }
         AssistantProviderId::Claude => {
-            let raw = run_claude_structured(&system_prompt, AVATAR_SCHEMA_JSON, cfg.claude_model.as_deref()).await?;
+            let raw = run_claude_structured(
+                &system_prompt,
+                AVATAR_SCHEMA_JSON,
+                cfg.claude_model.as_deref(),
+            )
+            .await?;
             let v: Value = serde_json::from_str(&raw).context("parse claude result wrapper")?;
             if let Some(so) = v.get("structured_output") {
                 serde_json::to_string(so).context("serialize structured_output")?
@@ -197,6 +204,7 @@ fn value_to_avatar(v: &Value) -> Result<AvatarSpecV1> {
         height,
         tags,
         parts,
+        mesh: None,
     })
 }
 
@@ -234,7 +242,10 @@ fn value_to_part(v: &Value) -> Option<AvatarPartV1> {
             .get("emission_color")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
-        emission_strength: obj.get("emission_strength").and_then(|v| v.as_f64()).map(|f| f as f32),
+        emission_strength: obj
+            .get("emission_strength")
+            .and_then(|v| v.as_f64())
+            .map(|f| f as f32),
     })
 }
 

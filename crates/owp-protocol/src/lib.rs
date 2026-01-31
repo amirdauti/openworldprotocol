@@ -62,6 +62,20 @@ pub struct AvatarSpecV1 {
     /// If empty, clients may fall back to interpreting `tags`.
     #[serde(default)]
     pub parts: Vec<AvatarPartV1>,
+    /// Optional generated mesh representation (e.g. via OpenSCAD/Blender pipeline).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh: Option<AvatarMeshV1>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvatarMeshV1 {
+    /// Mesh format identifier, e.g. "stl" or "gltf".
+    pub format: String,
+    /// URI to fetch the mesh from (typically a local admin endpoint).
+    pub uri: String,
+    /// Optional content hash for caching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

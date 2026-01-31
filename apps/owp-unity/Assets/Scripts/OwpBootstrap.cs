@@ -54,12 +54,16 @@ public class OwpBootstrap : MonoBehaviour
     private Vector3 _avatarBodyBaseScale = Vector3.one;
     private Vector3 _avatarHeadBaseScale = new Vector3(0.45f, 0.45f, 0.45f);
     private float _avatarHeadBaseY = 1.55f;
-    private Renderer _avatarRenderer;
-    private Renderer _hairRenderer;
+	    private Renderer _avatarRenderer;
+	    private Renderer _hairRenderer;
+	    private GameObject _avatarMeshGo;
+	    private MeshFilter _avatarMeshFilter;
+	    private MeshRenderer _avatarMeshRenderer;
+	    private string _avatarMeshSha256;
     private Texture2D _starterTexCircuit;
     private Texture2D _starterTexStripes;
     private Texture2D _starterTexScales;
-    private Texture2D _starterTexCloth;
+	    private Texture2D _starterTexCloth;
 
     private static Mesh _meshCone;
     private static Mesh _meshTorus;
@@ -99,10 +103,13 @@ public class OwpBootstrap : MonoBehaviour
 	    private Text _codexEffortLabel;
 	    private Button _claudeModelButton;
 	    private Text _claudeModelLabel;
+	    private Button _avatarMeshButton;
+	    private Text _avatarMeshLabel;
 
 	    private string _codexModel = "default";
 	    private string _codexEffort = "medium";
 	    private string _claudeModel = "default";
+	    private bool _avatarMeshEnabled = true;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     public static void Init()
@@ -327,10 +334,10 @@ public class OwpBootstrap : MonoBehaviour
 	        }
 	    }
 
-	    private IEnumerator RefreshAssistantConfig()
-	    {
-	        var task = HttpRequestAsync("GET", $"{AdminBaseUrl}/assistant/config", null, 5);
-	        yield return new WaitUntil(() => task.IsCompleted);
+		    private IEnumerator RefreshAssistantConfig()
+		    {
+		        var task = HttpRequestAsync("GET", $"{AdminBaseUrl}/assistant/config", null, 5);
+		        yield return new WaitUntil(() => task.IsCompleted);
 
 	        if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok)
 	        {
@@ -339,29 +346,31 @@ public class OwpBootstrap : MonoBehaviour
 	            yield break;
 	        }
 
-	        var cfg = JsonUtility.FromJson<AssistantConfigResponse>(task.Result.text);
-	        if (cfg == null)
-	        {
-	            UpdateAssistantSettingsUi();
-	            yield break;
-	        }
+		        var cfg = JsonUtility.FromJson<AssistantConfigResponse>(task.Result.text);
+		        if (cfg == null)
+		        {
+		            UpdateAssistantSettingsUi();
+		            yield break;
+		        }
 
-	        _codexModel = string.IsNullOrEmpty(cfg.codex_model) ? "default" : cfg.codex_model;
-	        _claudeModel = string.IsNullOrEmpty(cfg.claude_model) ? "default" : cfg.claude_model;
-	        _codexEffort = string.IsNullOrEmpty(cfg.codex_reasoning_effort) ? "medium" : cfg.codex_reasoning_effort;
-	        if (_codexEffort == "xhigh") _codexEffort = "very_high";
+		        _codexModel = string.IsNullOrEmpty(cfg.codex_model) ? "default" : cfg.codex_model;
+		        _claudeModel = string.IsNullOrEmpty(cfg.claude_model) ? "default" : cfg.claude_model;
+		        _codexEffort = string.IsNullOrEmpty(cfg.codex_reasoning_effort) ? "medium" : cfg.codex_reasoning_effort;
+		        if (_codexEffort == "xhigh") _codexEffort = "very_high";
+		        if (task.Result.text != null && task.Result.text.Contains("avatar_mesh_enabled")) _avatarMeshEnabled = cfg.avatar_mesh_enabled;
 
-	        UpdateAssistantSettingsUi();
-	    }
+		        UpdateAssistantSettingsUi();
+		    }
 
-	    private IEnumerator SaveAssistantConfig()
-	    {
-	        var json =
-	            "{"
-	            + "\"codex_model\":" + JsonEscape(_codexModel)
-	            + ",\"codex_reasoning_effort\":" + JsonEscape(_codexEffort)
-	            + ",\"claude_model\":" + JsonEscape(_claudeModel)
-	            + "}";
+		    private IEnumerator SaveAssistantConfig()
+		    {
+		        var json =
+		            "{"
+		            + "\"codex_model\":" + JsonEscape(_codexModel)
+		            + ",\"codex_reasoning_effort\":" + JsonEscape(_codexEffort)
+		            + ",\"claude_model\":" + JsonEscape(_claudeModel)
+		            + ",\"avatar_mesh_enabled\":" + (_avatarMeshEnabled ? "true" : "false")
+		            + "}";
 
 	        var task = HttpRequestAsync("POST", $"{AdminBaseUrl}/assistant/config", json, 10);
 	        yield return new WaitUntil(() => task.IsCompleted);
@@ -372,26 +381,28 @@ public class OwpBootstrap : MonoBehaviour
 	            yield break;
 	        }
 
-	        var cfg = JsonUtility.FromJson<AssistantConfigResponse>(task.Result.text);
-	        if (cfg != null)
-	        {
-	            _codexModel = string.IsNullOrEmpty(cfg.codex_model) ? "default" : cfg.codex_model;
-	            _claudeModel = string.IsNullOrEmpty(cfg.claude_model) ? "default" : cfg.claude_model;
-	            _codexEffort = string.IsNullOrEmpty(cfg.codex_reasoning_effort) ? "medium" : cfg.codex_reasoning_effort;
-	            if (_codexEffort == "xhigh") _codexEffort = "very_high";
-	        }
+		        var cfg = JsonUtility.FromJson<AssistantConfigResponse>(task.Result.text);
+		        if (cfg != null)
+		        {
+		            _codexModel = string.IsNullOrEmpty(cfg.codex_model) ? "default" : cfg.codex_model;
+		            _claudeModel = string.IsNullOrEmpty(cfg.claude_model) ? "default" : cfg.claude_model;
+		            _codexEffort = string.IsNullOrEmpty(cfg.codex_reasoning_effort) ? "medium" : cfg.codex_reasoning_effort;
+		            if (_codexEffort == "xhigh") _codexEffort = "very_high";
+		            _avatarMeshEnabled = cfg.avatar_mesh_enabled;
+		        }
 
-	        UpdateAssistantSettingsUi();
-	    }
+		        UpdateAssistantSettingsUi();
+		    }
 
-	    private void UpdateAssistantSettingsUi()
-	    {
-	        if (_codexModelLabel != null) _codexModelLabel.text = $"Codex model: {_codexModel}";
-	        // Server stores Codex effort as "xhigh" but UI uses "very_high".
-	        var effortLabel = _codexEffort == "xhigh" ? "very_high" : _codexEffort;
-	        if (_codexEffortLabel != null) _codexEffortLabel.text = $"Effort: {effortLabel}";
-	        if (_claudeModelLabel != null) _claudeModelLabel.text = $"Claude model: {_claudeModel}";
-	    }
+		    private void UpdateAssistantSettingsUi()
+		    {
+		        if (_codexModelLabel != null) _codexModelLabel.text = $"Codex model: {_codexModel}";
+		        // Server stores Codex effort as "xhigh" but UI uses "very_high".
+		        var effortLabel = _codexEffort == "xhigh" ? "very_high" : _codexEffort;
+		        if (_codexEffortLabel != null) _codexEffortLabel.text = $"Effort: {effortLabel}";
+		        if (_claudeModelLabel != null) _claudeModelLabel.text = $"Claude model: {_claudeModel}";
+		        if (_avatarMeshLabel != null) _avatarMeshLabel.text = $"Avatar mesh: {(_avatarMeshEnabled ? "on" : "off")}";
+		    }
 
 	    private static string CycleOption(string current, string[] options)
 	    {
@@ -792,6 +803,32 @@ public class OwpBootstrap : MonoBehaviour
         }
     }
 
+    private static async Task<(bool ok, long status, byte[] bytes, string error)> HttpGetBytesAsync(
+        string url,
+        int timeoutSeconds
+    )
+    {
+        try
+        {
+            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds)))
+            using (var req = new HttpRequestMessage(HttpMethod.Get, url))
+            using (var resp = await Http.SendAsync(req, cts.Token))
+            {
+                var code = (long)resp.StatusCode;
+                if (resp.Content == null)
+                {
+                    return (ok: false, status: code, bytes: null, error: "empty response");
+                }
+                var b = await resp.Content.ReadAsByteArrayAsync();
+                return (ok: code >= 200 && code < 300, status: code, bytes: b, error: null);
+            }
+        }
+        catch (Exception ex)
+        {
+            return (ok: false, status: 0, bytes: null, error: ex.Message);
+        }
+    }
+
     private IEnumerator ConnectAndHandshake(string host, int port, string worldId)
     {
         AppendLog($"Net: connecting to {host}:{port}…");
@@ -1144,6 +1181,129 @@ public class OwpBootstrap : MonoBehaviour
         ApplyStarterPackLook(avatar, archetype);
 
         ApplyAvatarParts(avatar);
+
+        // Optional mesh override (OpenSCAD STL pipeline).
+        StartCoroutine(EnsureAvatarMesh(avatar));
+    }
+
+    private IEnumerator EnsureAvatarMesh(AvatarSpec avatar)
+    {
+        if (avatar == null || avatar.mesh == null || string.IsNullOrEmpty(avatar.mesh.uri))
+        {
+            SetAvatarMeshActive(false);
+            yield break;
+        }
+        if (!string.Equals(avatar.mesh.format, "stl", StringComparison.OrdinalIgnoreCase))
+        {
+            SetAvatarMeshActive(false);
+            yield break;
+        }
+
+        // Cache by sha256 when provided.
+        var sha = avatar.mesh.sha256;
+        if (!string.IsNullOrEmpty(sha) && string.Equals(_avatarMeshSha256, sha, StringComparison.OrdinalIgnoreCase) && _avatarMeshGo != null)
+        {
+            SetAvatarMeshActive(true);
+            yield break;
+        }
+
+        var url = AdminBaseUrl + avatar.mesh.uri;
+        AppendLog("Avatar: loading mesh…");
+
+        var task = HttpGetBytesAsync(url, 60);
+        yield return new WaitUntil(() => task.IsCompleted);
+
+        if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok || task.Result.bytes == null || task.Result.bytes.Length == 0)
+        {
+            AppendLog($"Avatar: mesh load failed ({task.Result.status}).");
+            SetAvatarMeshActive(false);
+            yield break;
+        }
+
+        if (!StlImporter.TryLoad(task.Result.bytes, swapYAndZ: true, out var mesh, out var err))
+        {
+            AppendLog($"Avatar: mesh parse failed ({err}).");
+            SetAvatarMeshActive(false);
+            yield break;
+        }
+
+        EnsureAvatarMeshGo();
+
+        // Scale + ground-align to desired height.
+        var desiredHeight = Mathf.Clamp(avatar.height > 0.1f ? avatar.height : 1.8f, 0.5f, 2.0f);
+        var b = mesh.bounds;
+        var h = Mathf.Max(0.0001f, b.size.y);
+        var scale = desiredHeight / h;
+
+        // Offset so feet sit on y=0.
+        var minY = b.min.y;
+        var localOffset = new Vector3(0f, -minY, 0f);
+
+        _avatarMeshFilter.sharedMesh = mesh;
+        _avatarMeshGo.transform.localScale = Vector3.one * scale;
+        _avatarMeshGo.transform.localPosition = localOffset * scale;
+        _avatarMeshGo.transform.localRotation = Quaternion.identity;
+
+        // Apply a simple sci-fi material driven by avatar colors.
+        if (_avatarMeshRenderer != null)
+        {
+            var primary = ParseHexColor(avatar.primary_color, new Color(0f, 0.82f, 1f, 1f));
+            var emission = ParseHexColor(avatar.primary_color, Color.black) * 0.25f;
+            if (_avatarMeshRenderer.sharedMaterial == null)
+            {
+                _avatarMeshRenderer.sharedMaterial = new Material(Shader.Find("Standard"));
+            }
+            _avatarMeshRenderer.sharedMaterial.shader = Shader.Find("Standard");
+            _avatarMeshRenderer.sharedMaterial.color = primary;
+            _avatarMeshRenderer.sharedMaterial.SetFloat("_Metallic", 0.05f);
+            _avatarMeshRenderer.sharedMaterial.SetFloat("_Glossiness", 0.5f);
+            _avatarMeshRenderer.sharedMaterial.EnableKeyword("_EMISSION");
+            _avatarMeshRenderer.sharedMaterial.SetColor("_EmissionColor", emission);
+        }
+
+        _avatarMeshSha256 = sha;
+        SetAvatarMeshActive(true);
+        AppendLog("Avatar: mesh applied.");
+    }
+
+    private void EnsureAvatarMeshGo()
+    {
+        if (_avatarMeshGo != null) return;
+        if (_avatarRoot == null) return;
+
+        _avatarMeshGo = new GameObject("AvatarMesh");
+        _avatarMeshGo.transform.SetParent(_avatarRoot.transform, false);
+        _avatarMeshFilter = _avatarMeshGo.AddComponent<MeshFilter>();
+        _avatarMeshRenderer = _avatarMeshGo.AddComponent<MeshRenderer>();
+        _avatarMeshGo.SetActive(false);
+    }
+
+    private void SetAvatarMeshActive(bool active)
+    {
+        if (_avatarMeshGo != null) _avatarMeshGo.SetActive(active);
+
+        var showPrims = !active;
+        if (_avatarBody != null) _avatarBody.gameObject.SetActive(showPrims);
+        if (_avatarHead != null) _avatarHead.gameObject.SetActive(showPrims);
+        if (_avatarBodyPartsRoot != null) _avatarBodyPartsRoot.gameObject.SetActive(showPrims);
+        if (_avatarHeadPartsRoot != null) _avatarHeadPartsRoot.gameObject.SetActive(showPrims);
+    }
+
+    private static Color ParseHexColor(string hex, Color fallback)
+    {
+        if (string.IsNullOrEmpty(hex)) return fallback;
+        if (!hex.StartsWith("#") || hex.Length != 7) return fallback;
+        try
+        {
+            var r = byte.Parse(hex.Substring(1, 2), System.Globalization.NumberStyles.HexNumber);
+            var g = byte.Parse(hex.Substring(3, 2), System.Globalization.NumberStyles.HexNumber);
+            var b = byte.Parse(hex.Substring(5, 2), System.Globalization.NumberStyles.HexNumber);
+            return new Color(r / 255f, g / 255f, b / 255f, 1f);
+        }
+        catch
+        {
+            return fallback;
+        }
     }
 
     private void ApplyAvatarParts(AvatarSpec avatar)
@@ -1811,16 +1971,25 @@ public class OwpBootstrap : MonoBehaviour
             StartCoroutine(SaveAssistantConfig());
         });
 
-        _claudeModelButton = CreateSciFiButtonPositioned(_providerPanel.transform, "ClaudeModel", "Claude model: default", new Vector2(0, -62), new Vector2(420, 26));
-        _claudeModelLabel = _claudeModelButton.GetComponentInChildren<Text>();
-        _claudeModelButton.onClick.AddListener(() =>
-        {
-            _claudeModel = CycleOption(_claudeModel, ClaudeModelOptions);
-            UpdateAssistantSettingsUi();
-            StartCoroutine(SaveAssistantConfig());
-        });
+	        _claudeModelButton = CreateSciFiButtonPositioned(_providerPanel.transform, "ClaudeModel", "Claude model: default", new Vector2(0, -62), new Vector2(420, 26));
+	        _claudeModelLabel = _claudeModelButton.GetComponentInChildren<Text>();
+	        _claudeModelButton.onClick.AddListener(() =>
+	        {
+	            _claudeModel = CycleOption(_claudeModel, ClaudeModelOptions);
+	            UpdateAssistantSettingsUi();
+	            StartCoroutine(SaveAssistantConfig());
+	        });
 
-        _providerPanel.SetActive(false);
+	        _avatarMeshButton = CreateSciFiButtonPositioned(_providerPanel.transform, "AvatarMesh", "Avatar mesh: on", new Vector2(0, -96), new Vector2(420, 26));
+	        _avatarMeshLabel = _avatarMeshButton.GetComponentInChildren<Text>();
+	        _avatarMeshButton.onClick.AddListener(() =>
+	        {
+	            _avatarMeshEnabled = !_avatarMeshEnabled;
+	            UpdateAssistantSettingsUi();
+	            StartCoroutine(SaveAssistantConfig());
+	        });
+
+	        _providerPanel.SetActive(false);
 
         SetWorldsSource(false);
     }
@@ -2642,13 +2811,14 @@ public class OwpBootstrap : MonoBehaviour
 	    }
 
 	    [Serializable]
-	    private class AssistantConfigResponse
-	    {
-	        public string provider;
-	        public string codex_model;
-	        public string codex_reasoning_effort;
-	        public string claude_model;
-	    }
+		    private class AssistantConfigResponse
+		    {
+		        public string provider;
+		        public string codex_model;
+		        public string codex_reasoning_effort;
+		        public string claude_model;
+		        public bool avatar_mesh_enabled;
+		    }
 
 	    [Serializable]
 	    private class AssistantChatResponse
@@ -2742,16 +2912,25 @@ public class OwpBootstrap : MonoBehaviour
     }
 
 	    [Serializable]
-	    private class AvatarSpec
-	    {
-	        public string version;
-	        public string name;
-	        public string primary_color;
-	        public string secondary_color;
-	        public float height;
-	        public string[] tags;
-	        public AvatarPart[] parts;
-	    }
+		    private class AvatarSpec
+		    {
+		        public string version;
+		        public string name;
+		        public string primary_color;
+		        public string secondary_color;
+		        public float height;
+		        public string[] tags;
+		        public AvatarPart[] parts;
+		        public AvatarMesh mesh;
+		    }
+
+		    [Serializable]
+		    private class AvatarMesh
+		    {
+		        public string format;
+		        public string uri;
+		        public string sha256;
+		    }
 
 	    [Serializable]
 	    private class AvatarPart

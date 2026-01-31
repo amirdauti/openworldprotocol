@@ -24,11 +24,17 @@ Requirements:
 - Save/load local profile
 
 Implementation note (current):
-- The avatar is a procedural placeholder; “prompt anything” visuals require either a kitbash library (VRM) or an eventual text-to-3D pipeline.
-- Today the client renders:
+- The avatar is currently a procedural placeholder by default, but OWP supports a **hybrid prompt→mesh pipeline** for “prompt anything” avatars:
+  - Companion prompt → provider generates OpenSCAD code
+  - server runs `openscad` headlessly to render `avatar.stl`
+  - Unity downloads the STL and displays it at runtime (replacing the placeholder)
+- If mesh generation is disabled or `openscad` is missing, the client falls back to:
   - a base placeholder humanoid (capsule + sphere), plus
-  - a small set of procedural primitive attachments (`avatar.parts`) like horns, glow stripes, belt/chest plate, etc.
+  - a small set of procedural primitive attachments (`avatar.parts`), and
   - a simple “look” inferred from `avatar.tags` (archetype + pattern textures)
+
+Settings (MVP):
+- Toggle: `Avatar mesh` on/off (see `docs/ASSISTANT_PROVIDERS.md`)
 
 ## AI companion (“orb”)
 

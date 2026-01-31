@@ -81,4 +81,3 @@ mod tests {
         assert_eq!(data.len(), WorldEntry::LEN);
     }
 }
-

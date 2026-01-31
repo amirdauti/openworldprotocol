@@ -26,6 +26,7 @@ rand = "0.8.5"
 reqwest = { version = "0.12.12", default-features = false }
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.134"
+sha2 = "0.10.8"
 tempfile = "3.10.1"
 time = { version = "0.3.37", features = ["formatting", "macros", "parsing", "serde"] }
 tokio = { version = "1.43.0", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal"] }
@@ -34,5 +35,6 @@ tower-http = { version = "0.6.2", features = ["cors", "trace"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 thiserror = "2.0.11"
+hex = "0.4.3"
 url = "2.5.4"
 uuid = { version = "1.11.0", features = ["serde", "v4"] }
