@@ -1458,7 +1458,9 @@ public class OwpBootstrap : MonoBehaviour
 
     private static void RemoveCollider(GameObject go)
     {
-        var c = go.GetComponent<Collider>();
+        // Avoid a hard dependency on Unity's Physics module (Collider types can be disabled).
+        // Using the string overload keeps this script compiling even when Physics is not installed/enabled.
+        var c = go.GetComponent("Collider");
         if (c != null) Destroy(c);
     }
 
