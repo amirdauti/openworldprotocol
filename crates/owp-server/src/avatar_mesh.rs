@@ -47,6 +47,10 @@ pub fn avatar_mesh_stl_path(store: &WorldStore, profile_id: &str) -> PathBuf {
     avatar_mesh_dir(store, profile_id).join("avatar.stl")
 }
 
+pub fn avatar_mesh_stderr_path(store: &WorldStore, profile_id: &str) -> PathBuf {
+    avatar_mesh_dir(store, profile_id).join("openscad.stderr.txt")
+}
+
 pub fn avatar_mesh_exists(store: &WorldStore, profile_id: &str) -> bool {
     avatar_mesh_stl_path(store, profile_id).exists()
 }
@@ -86,6 +90,18 @@ Do not include markdown, backticks, or explanations.\n\
 Goal:\n\
 - Generate an avatar mesh that matches the user request.\n\
 - The model should be visually distinctive and recognizable.\n\
+- The silhouette should NOT be a single capsule/cylinder; include multiple body parts and accessories.\n\
+\n\
+Minimum structure (unless the user explicitly asks for something abstract):\n\
+- A head\n\
+- A torso\n\
+- Two arms + two legs (simple is fine)\n\
+- 1–3 iconic accessories tied to the prompt\n\
+  Examples:\n\
+  - wizard: pointed hat + staff + robe/cape\n\
+  - knight: helmet + chestplate + sword/shield\n\
+  - robot: segmented limbs + antenna + panel details\n\
+  - alien: elongated limbs + crest + bioluminescent markings\n\
 \n\
 Coordinate system + scale:\n\
 - OpenSCAD is Z-up. Use Z as UP.\n\
@@ -97,6 +113,10 @@ Performance constraints:\n\
 - Keep polygon count reasonable; use $fn <= 48.\n\
 - Prefer simple primitives + boolean ops + hull() + linear_extrude(); avoid excessive detail.\n\
 - Ensure the mesh is closed/manifold.\n\
+\n\
+Readability constraints:\n\
+- Exaggerate key features so they read at a distance (hat brim, staff head, shoulder silhouette, etc.).\n\
+- Avoid thin spikes/wires that may disappear; keep smallest feature thickness >= 0.02m.\n\
 \n\
 Safety constraints:\n\
 - Do NOT use import(), surface(), include, or use statements.\n\
@@ -172,6 +192,8 @@ User request: {user_prompt}\n"
 
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
+        let stderr_path = avatar_mesh_stderr_path(store, profile_id);
+        let _ = std::fs::write(&stderr_path, err.as_bytes());
         anyhow::bail!("openscad failed: {err}");
     }
 
