@@ -15,6 +15,11 @@ public class OwpBootstrap : MonoBehaviour
     private const string AdminBaseUrl = "http://127.0.0.1:9333";
     private static readonly HttpClient Http = new HttpClient();
     private static Font _defaultFont;
+    private static OwpBootstrap _instance;
+
+#if UNITY_EDITOR
+    private static bool _editorHooksInstalled;
+#endif
 
     private Process _serverProcess;
     private GameObject _avatarRoot;
@@ -60,12 +65,35 @@ public class OwpBootstrap : MonoBehaviour
 
     private void Start()
     {
+        _instance = this;
+#if UNITY_EDITOR
+        InstallEditorHooks();
+#endif
         EnsureSceneBasics();
         CreatePlaceholderAvatar();
         CreateUi();
 
         StartCoroutine(BootSequence());
     }
+
+#if UNITY_EDITOR
+    private static void InstallEditorHooks()
+    {
+        if (_editorHooksInstalled) return;
+        _editorHooksInstalled = true;
+        UnityEditor.EditorApplication.playModeStateChanged += (state) =>
+        {
+            if (state == UnityEditor.PlayModeStateChange.ExitingPlayMode)
+            {
+                try
+                {
+                    _instance?.KillChildProcesses();
+                }
+                catch { }
+            }
+        };
+    }
+#endif
 
     private IEnumerator BootSequence()
     {
@@ -347,6 +375,12 @@ public class OwpBootstrap : MonoBehaviour
         if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok)
         {
             var status = task.Status == TaskStatus.RanToCompletion ? task.Result.status : 0;
+            if (status == 404)
+            {
+                AppendLog("Assistant: server is outdated (missing /assistant/chat).");
+                AppendLog("Assistant: stop Play mode, rebuild `owp-server`, then Play again.");
+                yield break;
+            }
             if (status == 412)
             {
                 AppendLog("Assistant: choose Codex or Claude first.");
@@ -1361,6 +1395,16 @@ public class OwpBootstrap : MonoBehaviour
     }
 
     private void OnApplicationQuit()
+    {
+        KillChildProcesses();
+    }
+
+    private void OnDestroy()
+    {
+        KillChildProcesses();
+    }
+
+    private void KillChildProcesses()
     {
         try
         {
