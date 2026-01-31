@@ -31,7 +31,7 @@ Current focus: **Milestone A — Foundations**
 - [ ] Chunk/entity streaming + basic rendering loop
 - [~] Chat (Companion chat implemented; in-world chat TBD)
 - [x] Spawn local `owp-server` process (one-click host)
-- [~] Avatar preview + customization scene
+- [~] Avatar preview + customization scene (procedural kit + starter pack textures)
 - [x] AI companion (“orb”) UI + provider selection/settings (models + reasoning effort)
 
 ### Generation (local Claude/Codex)

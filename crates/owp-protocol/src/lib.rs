@@ -81,10 +81,10 @@ pub struct AvatarPartV1 {
     /// Base color hex like "#RRGGBB"
     pub color: String,
     /// Optional emission color hex like "#RRGGBB"
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emission_color: Option<String>,
     /// Optional emission intensity (0 disables). Typical range 0-5.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emission_strength: Option<f32>,
 }
 

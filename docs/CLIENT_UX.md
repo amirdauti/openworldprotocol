@@ -25,6 +25,10 @@ Requirements:
 
 Implementation note (current):
 - The avatar is a procedural placeholder; “prompt anything” visuals require either a kitbash library (VRM) or an eventual text-to-3D pipeline.
+- Today the client renders:
+  - a base placeholder humanoid (capsule + sphere), plus
+  - a small set of procedural primitive attachments (`avatar.parts`) like horns, glow stripes, belt/chest plate, etc.
+  - a simple “look” inferred from `avatar.tags` (archetype + pattern textures)
 
 ## AI companion (“orb”)
 

@@ -18,6 +18,7 @@ What works today:
 - AI Companion chat backed by local Codex CLI or Claude Code CLI
 - Provider selection + model settings (Codex model + reasoning effort, Claude model)
 - Avatar preview: procedural placeholder with structured `parts` (primitive kitbash with optional emission)
+- Built-in “starter pack” look: pattern textures + archetype styling inferred from `avatar.tags` (see `Assets/OWPStarterPack/`)
 
 ## Run (developer)
 

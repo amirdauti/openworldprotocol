@@ -28,13 +28,13 @@ public class OwpBootstrap : MonoBehaviour
 	        "default",
 	        "gpt-5.2",
 	        "gpt-5.2-codex",
-	        "gpt-5.1",
+	        "gpt-5.1-codex-max",
 	        "gpt-5.1-codex",
 	        "gpt-5.1-codex-mini",
-	        "gpt-5.1-codex-max",
-	        "gpt-5",
+	        "gpt-5.1",
 	        "gpt-5-codex",
 	        "gpt-5-codex-mini",
+	        "gpt-5",
 	        // Older/alt models (may or may not be enabled)
 	        "gpt-4.1",
 	        "gpt-4.1-mini",
@@ -48,8 +48,22 @@ public class OwpBootstrap : MonoBehaviour
     private Transform _avatarBody;
     private Transform _avatarHead;
     private Transform _avatarPartsRoot;
+    private Transform _avatarBodyPartsRoot;
+    private Transform _avatarHeadPartsRoot;
+    private string _avatarArchetype = "humanoid";
+    private Vector3 _avatarBodyBaseScale = Vector3.one;
+    private Vector3 _avatarHeadBaseScale = new Vector3(0.45f, 0.45f, 0.45f);
+    private float _avatarHeadBaseY = 1.55f;
     private Renderer _avatarRenderer;
     private Renderer _hairRenderer;
+    private Texture2D _starterTexCircuit;
+    private Texture2D _starterTexStripes;
+    private Texture2D _starterTexScales;
+    private Texture2D _starterTexCloth;
+
+    private static Mesh _meshCone;
+    private static Mesh _meshTorus;
+    private static Mesh _meshWing;
 
     private Canvas _canvas;
     private Button _orbButton;
@@ -106,6 +120,7 @@ public class OwpBootstrap : MonoBehaviour
 #endif
         EnsureSceneBasics();
         CreatePlaceholderAvatar();
+        LoadStarterPackResources();
         CreateUi();
 
         StartCoroutine(BootSequence());
@@ -572,12 +587,12 @@ public class OwpBootstrap : MonoBehaviour
         foreach (var w in worlds)
         {
             if (w == null) continue;
-            var btn = CreateButtonLayout(
+            var btn = CreateSciFiButton(
                 _worldsListRoot,
                 $"World_{w.world_id}",
-                $"{w.name}  ({w.port})",
+                $"{w.name}  [{w.port}]",
                 width: 0,
-                height: 34,
+                height: 30,
                 flexibleWidth: 1
             );
             var label = btn.GetComponentInChildren<Text>();
@@ -586,14 +601,19 @@ public class OwpBootstrap : MonoBehaviour
                 label.alignment = TextAnchor.MiddleLeft;
             }
 
-            // Simple selected-state highlight
-            var img = btn.GetComponent<Image>();
-            if (img != null)
+            // Selected-state highlight on border if present
+            var borderObj = btn.transform.Find($"World_{w.world_id}_Border");
+            if (borderObj != null)
             {
-                img.color = (w.world_id == _selectedWorldId)
-                    ? new Color(0.18f, 0.35f, 0.55f, 0.95f)
-                    : new Color(0.15f, 0.2f, 0.25f, 0.90f);
+                var borderImg = borderObj.GetComponent<Image>();
+                if (borderImg != null)
+                {
+                    borderImg.color = (w.world_id == _selectedWorldId)
+                        ? new Color(0f, 0.95f, 1f, 1f)
+                        : new Color(0f, 0.7f, 1f, 0.6f);
+                }
             }
+
             btn.onClick.AddListener(() =>
             {
                 SelectWorld(w.world_id, w.port, w.name);
@@ -603,7 +623,7 @@ public class OwpBootstrap : MonoBehaviour
 
         if (worlds.Length == 0)
         {
-            var t = CreateTextLayout(_worldsListRoot, "NoWorlds", "No worlds yet. Create one.", 14, TextAnchor.MiddleLeft);
+            var t = CreateSciFiText(_worldsListRoot, "NoWorlds", "No worlds yet. Create one.", 13, TextAnchor.MiddleLeft, new Color(0.6f, 0.8f, 0.95f, 0.8f));
             AddLayoutElement(t.gameObject, preferredWidth: -1, preferredHeight: 22, flexibleWidth: 1);
         }
     }
@@ -880,40 +900,269 @@ public class OwpBootstrap : MonoBehaviour
         return buf;
     }
 
+    private static string InferArchetype(AvatarSpec avatar)
+    {
+        if (avatar == null) return "humanoid";
+
+        if (avatar.tags != null)
+        {
+            foreach (var t in avatar.tags)
+            {
+                var tag = (t ?? "").ToLowerInvariant();
+                if (tag.Contains("robot") || tag.Contains("android") || tag.Contains("cyborg")) return "robot";
+                if (tag.Contains("dragon")) return "dragon";
+                if (tag.Contains("angel")) return "angel";
+                if (tag.Contains("wizard") || tag.Contains("mage")) return "wizard";
+                if (tag.Contains("navi") || tag.Contains("na'vi")) return "navi";
+            }
+        }
+
+        if (avatar.parts != null)
+        {
+            foreach (var p in avatar.parts)
+            {
+                if (p == null || string.IsNullOrEmpty(p.id)) continue;
+                var id = p.id.ToLowerInvariant();
+                if (id.Contains("visor") || id.Contains("antenna")) return "robot";
+                if (id.Contains("halo")) return "angel";
+                if (id.Contains("staff")) return "wizard";
+            }
+        }
+
+        return "humanoid";
+    }
+
+    private void EnsureAvatarBase(string archetype)
+    {
+        if (_avatarRoot == null) return;
+
+        archetype = string.IsNullOrEmpty(archetype) ? "humanoid" : archetype.ToLowerInvariant();
+        if (_avatarArchetype == archetype && _avatarBody != null && _avatarHead != null) return;
+        _avatarArchetype = archetype;
+
+        if (_avatarBodyPartsRoot != null) Destroy(_avatarBodyPartsRoot.gameObject);
+        if (_avatarHeadPartsRoot != null) Destroy(_avatarHeadPartsRoot.gameObject);
+        if (_avatarBody != null) Destroy(_avatarBody.gameObject);
+        if (_avatarHead != null) Destroy(_avatarHead.gameObject);
+
+        _avatarBodyPartsRoot = null;
+        _avatarHeadPartsRoot = null;
+        _avatarBody = null;
+        _avatarHead = null;
+        _avatarRenderer = null;
+        _hairRenderer = null;
+
+        var bodyPrim = PrimitiveType.Capsule;
+        var headPrim = PrimitiveType.Sphere;
+        _avatarBodyBaseScale = Vector3.one;
+        _avatarHeadBaseScale = new Vector3(0.45f, 0.45f, 0.45f);
+        _avatarHeadBaseY = 1.55f;
+
+        switch (archetype)
+        {
+            case "robot":
+                bodyPrim = PrimitiveType.Cube;
+                headPrim = PrimitiveType.Cube;
+                _avatarBodyBaseScale = new Vector3(0.9f, 1.25f, 0.6f);
+                _avatarHeadBaseScale = new Vector3(0.42f, 0.42f, 0.42f);
+                _avatarHeadBaseY = 1.65f;
+                break;
+            case "dragon":
+                _avatarBodyBaseScale = new Vector3(1.1f, 1.05f, 1.1f);
+                _avatarHeadBaseScale = new Vector3(0.48f, 0.48f, 0.48f);
+                _avatarHeadBaseY = 1.62f;
+                break;
+            case "navi":
+                _avatarBodyBaseScale = new Vector3(0.95f, 1.1f, 0.9f);
+                _avatarHeadBaseScale = new Vector3(0.42f, 0.42f, 0.42f);
+                _avatarHeadBaseY = 1.62f;
+                break;
+            case "angel":
+            case "wizard":
+            default:
+                break;
+        }
+
+        var body = GameObject.CreatePrimitive(bodyPrim);
+        body.name = "Body";
+        body.transform.SetParent(_avatarRoot.transform, false);
+        body.transform.localPosition = new Vector3(0, 1, 0);
+        body.transform.localScale = _avatarBodyBaseScale;
+        _avatarBody = body.transform;
+
+        _avatarRenderer = body.GetComponent<Renderer>();
+        _avatarRenderer.material = new Material(Shader.Find("Standard"));
+        _avatarRenderer.material.color = Color.cyan;
+
+        var head = GameObject.CreatePrimitive(headPrim);
+        head.name = "Head";
+        head.transform.SetParent(_avatarRoot.transform, false);
+        head.transform.localPosition = new Vector3(0, _avatarHeadBaseY, 0);
+        head.transform.localScale = _avatarHeadBaseScale;
+        _avatarHead = head.transform;
+
+        _hairRenderer = head.GetComponent<Renderer>();
+        _hairRenderer.material = new Material(Shader.Find("Standard"));
+        _hairRenderer.material.color = Color.white;
+
+        var bodyParts = new GameObject("BodyParts");
+        bodyParts.transform.SetParent(_avatarBody, false);
+        _avatarBodyPartsRoot = bodyParts.transform;
+
+        var headParts = new GameObject("HeadParts");
+        headParts.transform.SetParent(_avatarHead, false);
+        _avatarHeadPartsRoot = headParts.transform;
+    }
+
+    private void ApplyStarterPackLook(AvatarSpec avatar, string archetype)
+    {
+        var primary = ParseHex(avatar.primary_color, Color.cyan);
+        var secondary = ParseHex(avatar.secondary_color, Color.white);
+
+        var tags = "";
+        if (avatar.tags != null && avatar.tags.Length > 0)
+        {
+            tags = string.Join(" ", avatar.tags).ToLowerInvariant();
+        }
+
+        archetype = (archetype ?? "humanoid").ToLowerInvariant();
+        var isRobot = archetype == "robot" || tags.Contains("robot") || tags.Contains("cyborg") || tags.Contains("android");
+        var isDragon = archetype == "dragon" || tags.Contains("dragon");
+        var isAngel = archetype == "angel" || tags.Contains("angel");
+        var isWizard = archetype == "wizard" || tags.Contains("wizard") || tags.Contains("mage");
+        var isNavi = archetype == "navi" || tags.Contains("navi") || tags.Contains("na'vi");
+        var wantsGlow = tags.Contains("glow") || tags.Contains("biolum") || tags.Contains("neon");
+
+        Texture2D bodyTex = null;
+        Texture2D headTex = null;
+        var metallic = 0.0f;
+        var smoothness = 0.4f;
+
+        if (isRobot)
+        {
+            bodyTex = _starterTexCircuit;
+            headTex = _starterTexCircuit;
+            metallic = 0.85f;
+            smoothness = 0.88f;
+            wantsGlow = true;
+        }
+        else if (isDragon)
+        {
+            bodyTex = _starterTexScales;
+            headTex = _starterTexScales;
+            metallic = 0.1f;
+            smoothness = 0.35f;
+        }
+        else if (isWizard || isAngel)
+        {
+            bodyTex = _starterTexCloth;
+            headTex = _starterTexCloth;
+            metallic = 0.0f;
+            smoothness = 0.3f;
+        }
+        else if (isNavi)
+        {
+            bodyTex = _starterTexStripes;
+            headTex = _starterTexStripes;
+            metallic = 0.0f;
+            smoothness = 0.55f;
+            wantsGlow = wantsGlow || true;
+        }
+
+        var emission = wantsGlow ? primary : Color.black;
+        var emissionStrength = wantsGlow ? 0.6f : 0.0f;
+
+        ApplyRendererLook(_avatarRenderer, primary, bodyTex, metallic, smoothness, emission, emissionStrength, tiling: 2f);
+        ApplyRendererLook(_hairRenderer, secondary, headTex, metallic * 0.4f, smoothness, emission, emissionStrength * 0.4f, tiling: 2f);
+    }
+
+    private static void ApplyRendererLook(
+        Renderer r,
+        Color color,
+        Texture2D tex,
+        float metallic,
+        float smoothness,
+        Color emissionColor,
+        float emissionStrength,
+        float tiling
+    )
+    {
+        if (r == null) return;
+        if (r.material == null) r.material = new Material(Shader.Find("Standard"));
+
+        var m = r.material;
+        m.shader = Shader.Find("Standard");
+        m.color = color;
+        m.SetFloat("_Metallic", Mathf.Clamp01(metallic));
+        m.SetFloat("_Glossiness", Mathf.Clamp01(smoothness));
+
+        if (tex != null)
+        {
+            m.mainTexture = tex;
+            m.mainTextureScale = new Vector2(tiling, tiling);
+        }
+        else
+        {
+            m.mainTexture = null;
+        }
+
+        if (emissionStrength > 0.0f)
+        {
+            m.EnableKeyword("_EMISSION");
+            m.SetColor("_EmissionColor", emissionColor * emissionStrength);
+        }
+        else
+        {
+            m.DisableKeyword("_EMISSION");
+            m.SetColor("_EmissionColor", Color.black);
+        }
+    }
+
     private void ApplyAvatar(AvatarSpec avatar)
     {
         if (_avatarRoot == null) return;
+
+        var archetype = InferArchetype(avatar);
+        EnsureAvatarBase(archetype);
 
         _avatarRoot.name = $"Avatar_{avatar.name}";
         var height = Mathf.Clamp(avatar.height, 0.5f, 2f);
         if (_avatarBody != null)
         {
-            _avatarBody.localScale = new Vector3(1f, height, 1f);
+            _avatarBody.localScale = new Vector3(
+                _avatarBodyBaseScale.x,
+                _avatarBodyBaseScale.y * height,
+                _avatarBodyBaseScale.z
+            );
         }
         if (_avatarHead != null)
         {
-            _avatarHead.localPosition = new Vector3(0, 1.55f * height, 0);
+            _avatarHead.localPosition = new Vector3(0, _avatarHeadBaseY * height, 0);
+            _avatarHead.localScale = _avatarHeadBaseScale;
         }
 
-        if (_avatarRenderer != null)
-        {
-            _avatarRenderer.material.color = ParseHex(avatar.primary_color, Color.cyan);
-        }
-        if (_hairRenderer != null)
-        {
-            _hairRenderer.material.color = ParseHex(avatar.secondary_color, Color.white);
-        }
+        ApplyStarterPackLook(avatar, archetype);
 
         ApplyAvatarParts(avatar);
     }
 
     private void ApplyAvatarParts(AvatarSpec avatar)
     {
-        if (_avatarPartsRoot == null) return;
+        if (_avatarBodyPartsRoot == null && _avatarHeadPartsRoot == null) return;
 
-        for (int i = _avatarPartsRoot.childCount - 1; i >= 0; i--)
+        if (_avatarBodyPartsRoot != null)
         {
-            Destroy(_avatarPartsRoot.GetChild(i).gameObject);
+            for (int i = _avatarBodyPartsRoot.childCount - 1; i >= 0; i--)
+            {
+                Destroy(_avatarBodyPartsRoot.GetChild(i).gameObject);
+            }
+        }
+        if (_avatarHeadPartsRoot != null)
+        {
+            for (int i = _avatarHeadPartsRoot.childCount - 1; i >= 0; i--)
+            {
+                Destroy(_avatarHeadPartsRoot.GetChild(i).gameObject);
+            }
         }
 
         if (avatar.parts == null || avatar.parts.Length == 0)
@@ -931,9 +1180,9 @@ public class OwpBootstrap : MonoBehaviour
                         id = "horn_left",
                         attach = "head",
                         primitive = "capsule",
-                        position = new float[] { -0.18f, 0.18f, 0f },
+                        position = new float[] { -0.25f, 0.24f, 0.06f },
                         rotation = new float[] { 25f, 0f, 20f },
-                        scale = new float[] { 0.12f, 0.35f, 0.12f },
+                        scale = new float[] { 0.12f, 0.45f, 0.12f },
                         color = avatar.secondary_color,
                         emission_color = null,
                         emission_strength = 0f
@@ -943,9 +1192,9 @@ public class OwpBootstrap : MonoBehaviour
                         id = "horn_right",
                         attach = "head",
                         primitive = "capsule",
-                        position = new float[] { 0.18f, 0.18f, 0f },
+                        position = new float[] { 0.25f, 0.24f, 0.06f },
                         rotation = new float[] { 25f, 0f, -20f },
-                        scale = new float[] { 0.12f, 0.35f, 0.12f },
+                        scale = new float[] { 0.12f, 0.45f, 0.12f },
                         color = avatar.secondary_color,
                         emission_color = null,
                         emission_strength = 0f
@@ -961,7 +1210,7 @@ public class OwpBootstrap : MonoBehaviour
                             id = $"stripe_{i}",
                             attach = "body",
                             primitive = "cube",
-                            position = new float[] { -0.15f + i * 0.075f, 0.85f, 0.24f },
+                            position = new float[] { -0.15f + i * 0.075f, 0.85f, -0.56f },
                             rotation = new float[] { 0f, 0f, 0f },
                             scale = new float[] { 0.02f, 0.4f, 0.02f },
                             color = avatar.primary_color,
@@ -983,27 +1232,95 @@ public class OwpBootstrap : MonoBehaviour
 
     private void SpawnPart(AvatarPart p, AvatarSpec avatar)
     {
-        var prim = ParsePrimitive(p.primitive);
-        var go = GameObject.CreatePrimitive(prim);
-        go.name = $"Part_{p.id}";
-        go.transform.SetParent(_avatarPartsRoot, false);
+        EnsureStarterMeshes();
+
+        var root = new GameObject($"Part_{p.id}");
 
         var attach = (p.attach ?? "body").ToLowerInvariant();
-        if (attach == "head" && _avatarHead != null)
+        if (attach == "head" && _avatarHeadPartsRoot != null)
         {
-            go.transform.SetParent(_avatarHead, false);
+            root.transform.SetParent(_avatarHeadPartsRoot, false);
+        }
+        else if (attach == "head" && _avatarHead != null)
+        {
+            root.transform.SetParent(_avatarHead, false);
+        }
+        else if (_avatarBodyPartsRoot != null)
+        {
+            root.transform.SetParent(_avatarBodyPartsRoot, false);
         }
         else if (_avatarBody != null)
         {
-            go.transform.SetParent(_avatarBody, false);
+            root.transform.SetParent(_avatarBody, false);
+        }
+        else if (_avatarRoot != null)
+        {
+            root.transform.SetParent(_avatarRoot.transform, false);
         }
 
-        go.transform.localPosition = ToVector3(p.position);
-        go.transform.localRotation = Quaternion.Euler(ToVector3(p.rotation));
-        go.transform.localScale = ToVector3(p.scale, Vector3.one * 0.1f);
+        root.transform.localPosition = ToVector3(p.position);
+        root.transform.localRotation = Quaternion.Euler(ToVector3(p.rotation));
+        root.transform.localScale = ToVector3(p.scale, Vector3.one * 0.1f);
 
+        var id = (p.id ?? "").ToLowerInvariant();
+        if (id.Contains("staff"))
+        {
+            SpawnWizardStaff(root.transform, p, avatar);
+            return;
+        }
+        if (id.Contains("hat_top"))
+        {
+            SpawnWizardHatTop(root.transform, p, avatar);
+            return;
+        }
+        if (id.Contains("halo"))
+        {
+            SpawnHalo(root.transform, p, avatar);
+            return;
+        }
+        if (id.Contains("wing"))
+        {
+            SpawnWing(root.transform, p, avatar);
+            return;
+        }
+
+        // default primitive
+        var prim = ParsePrimitive(p.primitive);
+        var go = GameObject.CreatePrimitive(prim);
+        go.name = "Primitive";
+        go.transform.SetParent(root.transform, false);
+        go.transform.localPosition = Vector3.zero;
+        go.transform.localRotation = Quaternion.identity;
+        go.transform.localScale = Vector3.one;
+        RemoveCollider(go);
+        ApplyPartMaterial(go, p);
+    }
+
+    private static void RemoveCollider(GameObject go)
+    {
+        var c = go.GetComponent<Collider>();
+        if (c != null) Destroy(c);
+    }
+
+    private static void ApplyPartMaterial(GameObject go, AvatarPart p)
+    {
         var r = go.GetComponent<Renderer>();
-        if (r != null)
+        if (r == null) return;
+
+        r.material = new Material(Shader.Find("Standard"));
+        r.material.color = ParseHex(p.color, Color.white);
+
+        if (!string.IsNullOrEmpty(p.emission_color) && p.emission_strength > 0f)
+        {
+            var ec = ParseHex(p.emission_color, r.material.color);
+            r.material.EnableKeyword("_EMISSION");
+            r.material.SetColor("_EmissionColor", ec * p.emission_strength);
+        }
+    }
+
+    private void ApplyPartMaterialRecursive(Transform root, AvatarPart p)
+    {
+        foreach (var r in root.GetComponentsInChildren<Renderer>())
         {
             r.material = new Material(Shader.Find("Standard"));
             r.material.color = ParseHex(p.color, Color.white);
@@ -1014,6 +1331,96 @@ public class OwpBootstrap : MonoBehaviour
                 r.material.EnableKeyword("_EMISSION");
                 r.material.SetColor("_EmissionColor", ec * p.emission_strength);
             }
+        }
+    }
+
+    private void SpawnWizardStaff(Transform parent, AvatarPart p, AvatarSpec avatar)
+    {
+        // Shaft
+        var shaft = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        shaft.name = "Staff_Shaft";
+        shaft.transform.SetParent(parent, false);
+        shaft.transform.localPosition = new Vector3(0f, 0.5f, 0f);
+        shaft.transform.localRotation = Quaternion.identity;
+        shaft.transform.localScale = new Vector3(0.12f, 1.0f, 0.12f);
+        RemoveCollider(shaft);
+
+        // Top crystal
+        var gem = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        gem.name = "Staff_Gem";
+        gem.transform.SetParent(parent, false);
+        gem.transform.localPosition = new Vector3(0f, 1.12f, 0f);
+        gem.transform.localRotation = Quaternion.identity;
+        gem.transform.localScale = new Vector3(0.28f, 0.28f, 0.28f);
+        RemoveCollider(gem);
+
+        var gemPart = new AvatarPart
+        {
+            id = p.id,
+            attach = p.attach,
+            primitive = "sphere",
+            position = p.position,
+            rotation = p.rotation,
+            scale = p.scale,
+            color = avatar.primary_color,
+            emission_color = avatar.primary_color,
+            emission_strength = 2.2f
+        };
+
+        ApplyPartMaterial(shaft, p);
+        ApplyPartMaterial(gem, gemPart);
+    }
+
+    private void SpawnWizardHatTop(Transform parent, AvatarPart p, AvatarSpec avatar)
+    {
+        var go = new GameObject("Hat_Cone");
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = new Vector3(0f, 0.35f, 0f);
+        go.transform.localRotation = Quaternion.identity;
+        go.transform.localScale = new Vector3(0.55f, 0.75f, 0.55f);
+
+        var mf = go.AddComponent<MeshFilter>();
+        mf.sharedMesh = _meshCone;
+        var mr = go.AddComponent<MeshRenderer>();
+        mr.material = new Material(Shader.Find("Standard"));
+        mr.material.color = ParseHex(p.color, Color.white);
+    }
+
+    private void SpawnHalo(Transform parent, AvatarPart p, AvatarSpec avatar)
+    {
+        var go = new GameObject("Halo_Torus");
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = Vector3.zero;
+        go.transform.localRotation = Quaternion.identity;
+        go.transform.localScale = Vector3.one;
+
+        var mf = go.AddComponent<MeshFilter>();
+        mf.sharedMesh = _meshTorus;
+        var mr = go.AddComponent<MeshRenderer>();
+        mr.material = new Material(Shader.Find("Standard"));
+        var c = ParseHex(p.color, Color.white);
+        mr.material.color = c;
+        mr.material.EnableKeyword("_EMISSION");
+        mr.material.SetColor("_EmissionColor", c * 2.0f);
+    }
+
+    private void SpawnWing(Transform parent, AvatarPart p, AvatarSpec avatar)
+    {
+        var go = new GameObject("Wing_Quad");
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = Vector3.zero;
+        go.transform.localRotation = Quaternion.identity;
+        go.transform.localScale = Vector3.one;
+
+        var mf = go.AddComponent<MeshFilter>();
+        mf.sharedMesh = _meshWing;
+        var mr = go.AddComponent<MeshRenderer>();
+        mr.material = new Material(Shader.Find("Standard"));
+        mr.material.color = ParseHex(p.color, Color.white);
+        if (_starterTexStripes != null)
+        {
+            mr.material.mainTexture = _starterTexStripes;
+            mr.material.mainTextureScale = new Vector2(2f, 2f);
         }
     }
 
@@ -1051,35 +1458,167 @@ public class OwpBootstrap : MonoBehaviour
         return "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "") + "\"";
     }
 
+    private void LoadStarterPackResources()
+    {
+        // Optional built-in textures for a slightly more detailed “starter pack” look.
+        // These live under Assets/Resources/OWPStarterPack/Textures/.
+        _starterTexCircuit = Resources.Load<Texture2D>("OWPStarterPack/Textures/circuit");
+        _starterTexStripes = Resources.Load<Texture2D>("OWPStarterPack/Textures/stripes");
+        _starterTexScales = Resources.Load<Texture2D>("OWPStarterPack/Textures/scales");
+        _starterTexCloth = Resources.Load<Texture2D>("OWPStarterPack/Textures/cloth");
+    }
+
+    private static void EnsureStarterMeshes()
+    {
+        if (_meshCone == null) _meshCone = BuildConeMesh(20);
+        if (_meshTorus == null) _meshTorus = BuildTorusMesh(0.5f, 0.12f, 28, 14);
+        if (_meshWing == null) _meshWing = BuildWingMesh();
+    }
+
+    private static Mesh BuildWingMesh()
+    {
+        var m = new Mesh();
+        var v = new[]
+        {
+            new Vector3(0f, 0f, 0f),
+            new Vector3(1f, 0f, 0f),
+            new Vector3(0f, 1f, 0f),
+            new Vector3(1f, 1f, 0f),
+        };
+        var uv = new[]
+        {
+            new Vector2(0f, 0f),
+            new Vector2(1f, 0f),
+            new Vector2(0f, 1f),
+            new Vector2(1f, 1f),
+        };
+        var t = new[] { 0, 2, 1, 2, 3, 1 };
+        m.vertices = v;
+        m.uv = uv;
+        m.triangles = t;
+        m.RecalculateNormals();
+        m.RecalculateBounds();
+        return m;
+    }
+
+    private static Mesh BuildConeMesh(int sides)
+    {
+        sides = Mathf.Clamp(sides, 8, 64);
+        var m = new Mesh();
+        var verts = new System.Collections.Generic.List<Vector3>();
+        var tris = new System.Collections.Generic.List<int>();
+
+        // tip
+        verts.Add(new Vector3(0f, 1f, 0f)); // 0
+        // base center
+        verts.Add(new Vector3(0f, 0f, 0f)); // 1
+
+        for (int i = 0; i < sides; i++)
+        {
+            var a = (float)i / sides * Mathf.PI * 2f;
+            verts.Add(new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)));
+        }
+
+        // side triangles
+        for (int i = 0; i < sides; i++)
+        {
+            var a = 2 + i;
+            var b = 2 + ((i + 1) % sides);
+            tris.Add(0);
+            tris.Add(b);
+            tris.Add(a);
+        }
+
+        // base triangles
+        for (int i = 0; i < sides; i++)
+        {
+            var a = 2 + i;
+            var b = 2 + ((i + 1) % sides);
+            tris.Add(1);
+            tris.Add(a);
+            tris.Add(b);
+        }
+
+        m.SetVertices(verts);
+        m.SetTriangles(tris, 0);
+        m.RecalculateNormals();
+        m.RecalculateBounds();
+        return m;
+    }
+
+    private static Mesh BuildTorusMesh(float majorRadius, float minorRadius, int majorSegments, int minorSegments)
+    {
+        majorSegments = Mathf.Clamp(majorSegments, 12, 128);
+        minorSegments = Mathf.Clamp(minorSegments, 8, 64);
+        majorRadius = Mathf.Max(0.05f, majorRadius);
+        minorRadius = Mathf.Max(0.01f, minorRadius);
+
+        var m = new Mesh();
+        var verts = new Vector3[majorSegments * minorSegments];
+        var uvs = new Vector2[verts.Length];
+        var tris = new int[majorSegments * minorSegments * 6];
+
+        int vi = 0;
+        for (int i = 0; i < majorSegments; i++)
+        {
+            var u = (float)i / majorSegments;
+            var a = u * Mathf.PI * 2f;
+            var center = new Vector3(Mathf.Cos(a) * majorRadius, 0f, Mathf.Sin(a) * majorRadius);
+            var tangent = new Vector3(-Mathf.Sin(a), 0f, Mathf.Cos(a));
+            var up = Vector3.up;
+            var bitangent = Vector3.Cross(tangent, up).normalized;
+            tangent = tangent.normalized;
+
+            for (int j = 0; j < minorSegments; j++)
+            {
+                var v = (float)j / minorSegments;
+                var b = v * Mathf.PI * 2f;
+                var ring = (Mathf.Cos(b) * bitangent + Mathf.Sin(b) * up) * minorRadius;
+                verts[vi] = center + ring;
+                uvs[vi] = new Vector2(u, v);
+                vi++;
+            }
+        }
+
+        int ti = 0;
+        for (int i = 0; i < majorSegments; i++)
+        {
+            int ni = (i + 1) % majorSegments;
+            for (int j = 0; j < minorSegments; j++)
+            {
+                int nj = (j + 1) % minorSegments;
+                int a = i * minorSegments + j;
+                int b = ni * minorSegments + j;
+                int c = i * minorSegments + nj;
+                int d = ni * minorSegments + nj;
+
+                tris[ti++] = a;
+                tris[ti++] = d;
+                tris[ti++] = b;
+                tris[ti++] = a;
+                tris[ti++] = c;
+                tris[ti++] = d;
+            }
+        }
+
+        m.vertices = verts;
+        m.uv = uvs;
+        m.triangles = tris;
+        m.RecalculateNormals();
+        m.RecalculateBounds();
+        return m;
+    }
+
     private void CreatePlaceholderAvatar()
     {
         _avatarRoot = new GameObject("AvatarRoot");
         _avatarRoot.transform.position = new Vector3(0, 0, 0);
 
-        var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-        body.name = "Body";
-        body.transform.SetParent(_avatarRoot.transform, false);
-        body.transform.localPosition = new Vector3(0, 1, 0);
-        _avatarBody = body.transform;
-
-        _avatarRenderer = body.GetComponent<Renderer>();
-        _avatarRenderer.material = new Material(Shader.Find("Standard"));
-        _avatarRenderer.material.color = Color.cyan;
-
-        var head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        head.name = "Head";
-        head.transform.SetParent(_avatarRoot.transform, false);
-        head.transform.localPosition = new Vector3(0, 1.55f, 0);
-        head.transform.localScale = new Vector3(0.45f, 0.45f, 0.45f);
-        _avatarHead = head.transform;
-
-        _hairRenderer = head.GetComponent<Renderer>();
-        _hairRenderer.material = new Material(Shader.Find("Standard"));
-        _hairRenderer.material.color = Color.white;
-
         var parts = new GameObject("Parts");
         parts.transform.SetParent(_avatarRoot.transform, false);
         _avatarPartsRoot = parts.transform;
+
+        EnsureAvatarBase("humanoid");
     }
 
     private void EnsureSceneBasics()
@@ -1132,7 +1671,7 @@ public class OwpBootstrap : MonoBehaviour
         rootRt.offsetMax = Vector2.zero;
 
         // Worlds panel (left)
-        _worldsPanel = CreatePanel(root.transform, "WorldsPanel", new Color(0, 0, 0, 0.35f));
+        _worldsPanel = CreateSciFiPanel(root.transform, "WorldsPanel", new Color(0.03f, 0.05f, 0.12f, 0.92f), new Color(0f, 0.7f, 1f, 0.5f));
         var worldsRt = _worldsPanel.GetComponent<RectTransform>();
         worldsRt.anchorMin = new Vector2(0, 0);
         worldsRt.anchorMax = new Vector2(0.42f, 1);
@@ -1140,31 +1679,31 @@ public class OwpBootstrap : MonoBehaviour
         worldsRt.offsetMax = new Vector2(-8, -16);
 
         var worldsLayout = _worldsPanel.AddComponent<VerticalLayoutGroup>();
-        worldsLayout.padding = new RectOffset(12, 12, 12, 12);
-        worldsLayout.spacing = 10;
+        worldsLayout.padding = new RectOffset(10, 10, 10, 10);
+        worldsLayout.spacing = 8;
         worldsLayout.childControlWidth = true;
         worldsLayout.childControlHeight = true;
         worldsLayout.childForceExpandWidth = true;
         worldsLayout.childForceExpandHeight = false;
 
         // Worlds header row
-        var worldsHeader = CreateRow(_worldsPanel.transform, "WorldsHeader", 32);
-        var worldsTitle = CreateTextLayout(worldsHeader.transform, "WorldsTitle", "Worlds", 18, TextAnchor.MiddleLeft);
-        AddLayoutElement(worldsTitle.gameObject, preferredWidth: -1, preferredHeight: 32, flexibleWidth: 1);
-        _worldsSourceButton = CreateButtonLayout(worldsHeader.transform, "WorldsSource", "Source: Local", 140, 28);
+        var worldsHeader = CreateRow(_worldsPanel.transform, "WorldsHeader", 28);
+        var worldsTitle = CreateSciFiText(worldsHeader.transform, "WorldsTitle", "Worlds", 16, TextAnchor.MiddleLeft, new Color(0.7f, 0.9f, 1f, 1f));
+        AddLayoutElement(worldsTitle.gameObject, preferredWidth: -1, preferredHeight: 28, flexibleWidth: 1);
+        _worldsSourceButton = CreateSciFiButton(worldsHeader.transform, "WorldsSource", "Source: Local", 130, 24);
         _worldsSourceLabel = _worldsSourceButton.GetComponentInChildren<Text>();
         _worldsSourceButton.onClick.AddListener(() =>
         {
             SetWorldsSource(!_worldsUseOnChain);
             StartCoroutine(RefreshWorlds());
         });
-        _refreshWorldsButton = CreateButtonLayout(worldsHeader.transform, "RefreshWorlds", "Refresh", 110, 28);
+        _refreshWorldsButton = CreateSciFiButton(worldsHeader.transform, "RefreshWorlds", "Refresh", 100, 24);
         _refreshWorldsButton.onClick.AddListener(() => StartCoroutine(RefreshWorlds()));
 
         // Worlds create row
-        var createRow = CreateRow(_worldsPanel.transform, "WorldsCreate", 32);
-        _worldNameInput = CreateInputLayout(createRow.transform, "WorldName", "World name…", 0, 32, flexibleWidth: 1);
-        _createWorldButton = CreateButtonLayout(createRow.transform, "CreateWorld", "Create", 110, 32);
+        var createRow = CreateRow(_worldsPanel.transform, "WorldsCreate", 30);
+        _worldNameInput = CreateSciFiInput(createRow.transform, "WorldName", "World name…", 0, 28, flexibleWidth: 1);
+        _createWorldButton = CreateSciFiButton(createRow.transform, "CreateWorld", "Create", 100, 28);
         _createWorldButton.onClick.AddListener(() =>
         {
             var n = (_worldNameInput.text ?? "").Trim();
@@ -1173,7 +1712,7 @@ public class OwpBootstrap : MonoBehaviour
             StartCoroutine(CreateWorld(n));
         });
 
-        _selectedWorldLabel = CreateTextLayout(_worldsPanel.transform, "SelectedWorld", "Selected: (none)", 14, TextAnchor.MiddleLeft);
+        _selectedWorldLabel = CreateSciFiText(_worldsPanel.transform, "SelectedWorld", "Selected: (none)", 12, TextAnchor.MiddleLeft, new Color(0.7f, 0.9f, 1f, 0.9f));
         AddLayoutElement(_selectedWorldLabel.gameObject, preferredWidth: -1, preferredHeight: 22, flexibleWidth: 1);
 
         // Worlds list (scroll)
@@ -1181,11 +1720,11 @@ public class OwpBootstrap : MonoBehaviour
         AddLayoutElement(worldsScroll.scrollRect.gameObject, preferredWidth: -1, preferredHeight: -1, flexibleWidth: 1, flexibleHeight: 1);
         _worldsListRoot = worldsScroll.content;
 
-        _hostConnectButton = CreateButtonLayout(_worldsPanel.transform, "HostConnect", "Host + Connect", 0, 34, flexibleWidth: 1);
+        _hostConnectButton = CreateSciFiButton(_worldsPanel.transform, "HostConnect", "Host + Connect", 0, 30, flexibleWidth: 1);
         _hostConnectButton.onClick.AddListener(() => StartCoroutine(HostAndConnectSelectedWorld()));
 
         // Companion panel (right)
-        _chatPanel = CreatePanel(root.transform, "CompanionPanel", new Color(0, 0, 0, 0.70f));
+        _chatPanel = CreateSciFiPanel(root.transform, "CompanionPanel", new Color(0.03f, 0.05f, 0.12f, 0.92f), new Color(0f, 0.6f, 1f, 0.4f));
         var chatRt = _chatPanel.GetComponent<RectTransform>();
         chatRt.anchorMin = new Vector2(0.42f, 0);
         chatRt.anchorMax = new Vector2(1, 1);
@@ -1193,30 +1732,30 @@ public class OwpBootstrap : MonoBehaviour
         chatRt.offsetMax = new Vector2(-16, -16);
 
         var chatLayout = _chatPanel.AddComponent<VerticalLayoutGroup>();
-        chatLayout.padding = new RectOffset(12, 12, 12, 12);
-        chatLayout.spacing = 10;
+        chatLayout.padding = new RectOffset(10, 10, 10, 10);
+        chatLayout.spacing = 8;
         chatLayout.childControlWidth = true;
         chatLayout.childControlHeight = true;
         chatLayout.childForceExpandWidth = true;
         chatLayout.childForceExpandHeight = false;
 
-        var chatHeader = CreateRow(_chatPanel.transform, "CompanionHeader", 32);
-        var companionTitle = CreateTextLayout(chatHeader.transform, "CompanionTitle", "Companion", 18, TextAnchor.MiddleLeft);
-        AddLayoutElement(companionTitle.gameObject, preferredWidth: -1, preferredHeight: 32, flexibleWidth: 1);
-        _providerButton = CreateButtonLayout(chatHeader.transform, "ProviderButton", "Provider: (loading…)", 180, 28);
+        var chatHeader = CreateRow(_chatPanel.transform, "CompanionHeader", 28);
+        var companionTitle = CreateSciFiText(chatHeader.transform, "CompanionTitle", "Companion", 16, TextAnchor.MiddleLeft, new Color(0.7f, 0.9f, 1f, 1f));
+        AddLayoutElement(companionTitle.gameObject, preferredWidth: -1, preferredHeight: 28, flexibleWidth: 1);
+        _providerButton = CreateSciFiButton(chatHeader.transform, "ProviderButton", "Provider: (loading…)", 150, 24);
         _providerButtonLabel = _providerButton.GetComponentInChildren<Text>();
         _providerButton.onClick.AddListener(() => StartCoroutine(RefreshAssistantStatus(true)));
 
-        var chatScroll = CreateChatScroll(_chatPanel.transform, "ChatScroll");
+        var chatScroll = CreateSciFiChatScroll(_chatPanel.transform, "ChatScroll");
         AddLayoutElement(chatScroll.scrollRect.gameObject, preferredWidth: -1, preferredHeight: -1, flexibleWidth: 1, flexibleHeight: 1);
         _chatLog = chatScroll.text;
         _chatScrollRect = chatScroll.scrollRect;
         _chatLog.alignment = TextAnchor.UpperLeft;
         _chatLog.supportRichText = true;
 
-        var inputRow = CreateRow(_chatPanel.transform, "ChatInputRow", 36);
-        _chatInput = CreateInputLayout(inputRow.transform, "ChatInput", "Describe your avatar…", 0, 36, flexibleWidth: 1);
-        _sendButton = CreateButtonLayout(inputRow.transform, "SendButton", "Send", 110, 36);
+        var inputRow = CreateRow(_chatPanel.transform, "ChatInputRow", 32);
+        _chatInput = CreateSciFiInput(inputRow.transform, "ChatInput", "Describe your avatar…", 0, 28, flexibleWidth: 1);
+        _sendButton = CreateSciFiButton(inputRow.transform, "SendButton", "Send", 90, 28);
         _sendButton.onClick.AddListener(() =>
         {
             var text = _chatInput.text ?? "";
@@ -1227,68 +1766,64 @@ public class OwpBootstrap : MonoBehaviour
         });
 
         // Orb toggle (top-right)
-        _orbButton = CreateButton(canvasGo.transform, "OrbButton", "◉", new Vector2(-40, -40), new Vector2(60, 60));
+        _orbButton = CreateSciFiOrbButton(canvasGo.transform, "OrbButton", "◎", new Vector2(-34, -34), new Vector2(44, 44));
         _orbButton.onClick.AddListener(() =>
         {
             _chatPanel.SetActive(!_chatPanel.activeSelf);
         });
 
         // Provider panel (center)
-        _providerPanel = new GameObject("ProviderPanel");
-        _providerPanel.transform.SetParent(canvasGo.transform, false);
-        var pimg = _providerPanel.AddComponent<Image>();
-        pimg.color = new Color(0, 0, 0, 0.85f);
-	        var prt = _providerPanel.GetComponent<RectTransform>();
-	        prt.anchorMin = new Vector2(0.5f, 0.5f);
-	        prt.anchorMax = new Vector2(0.5f, 0.5f);
-	        prt.pivot = new Vector2(0.5f, 0.5f);
-	        prt.sizeDelta = new Vector2(560, 260);
-	        prt.anchoredPosition = Vector2.zero;
+        _providerPanel = CreateSciFiPanel(canvasGo.transform, "ProviderPanel", new Color(0.02f, 0.04f, 0.1f, 0.96f), new Color(0f, 0.8f, 1f, 0.6f));
+        var prt = _providerPanel.GetComponent<RectTransform>();
+        prt.anchorMin = new Vector2(0.5f, 0.5f);
+        prt.anchorMax = new Vector2(0.5f, 0.5f);
+        prt.pivot = new Vector2(0.5f, 0.5f);
+        prt.sizeDelta = new Vector2(520, 230);
+        prt.anchoredPosition = Vector2.zero;
 
-	        var providerTitle = CreateText(_providerPanel.transform, "ProviderTitle", "Choose provider", new Vector2(-10, -20), new Vector2(540, 40));
-	        providerTitle.alignment = TextAnchor.MiddleCenter;
-	        providerTitle.fontSize = 20;
+        var providerTitle = CreateSciFiTextPositioned(_providerPanel.transform, "ProviderTitle", "Choose provider", new Vector2(0, 86), new Vector2(480, 26), new Color(0.7f, 0.95f, 1f, 1f));
+        providerTitle.alignment = TextAnchor.MiddleCenter;
 
-	        _useCodexButton = CreateButton(_providerPanel.transform, "UseCodex", "Use Codex", new Vector2(-300, -80), new Vector2(240, 44));
-	        _useClaudeButton = CreateButton(_providerPanel.transform, "UseClaude", "Use Claude", new Vector2(-20, -80), new Vector2(240, 44));
+        _useCodexButton = CreateSciFiButtonPositioned(_providerPanel.transform, "UseCodex", "Use Codex", new Vector2(-120, 44), new Vector2(200, 30));
+        _useClaudeButton = CreateSciFiButtonPositioned(_providerPanel.transform, "UseClaude", "Use Claude", new Vector2(120, 44), new Vector2(200, 30));
 
-	        _useCodexButton.onClick.AddListener(() => StartCoroutine(SetProvider("codex")));
-	        _useClaudeButton.onClick.AddListener(() => StartCoroutine(SetProvider("claude")));
+        _useCodexButton.onClick.AddListener(() => StartCoroutine(SetProvider("codex")));
+        _useClaudeButton.onClick.AddListener(() => StartCoroutine(SetProvider("claude")));
 
-	        var settingsTitle = CreateText(_providerPanel.transform, "SettingsTitle", "Model + Reasoning", new Vector2(-10, -130), new Vector2(540, 26));
-	        settingsTitle.alignment = TextAnchor.MiddleLeft;
+        var settingsTitle = CreateSciFiTextPositioned(_providerPanel.transform, "SettingsTitle", "Model + Reasoning", new Vector2(0, 8), new Vector2(480, 22), new Color(0.6f, 0.9f, 1f, 0.9f));
+        settingsTitle.alignment = TextAnchor.MiddleCenter;
 
-	        _codexModelButton = CreateButton(_providerPanel.transform, "CodexModel", "Codex model: default", new Vector2(-300, -160), new Vector2(240, 34));
-	        _codexModelLabel = _codexModelButton.GetComponentInChildren<Text>();
-	        _codexModelButton.onClick.AddListener(() =>
-	        {
-	            _codexModel = CycleOption(_codexModel, CodexModelOptions);
-	            UpdateAssistantSettingsUi();
-	            StartCoroutine(SaveAssistantConfig());
-	        });
+        _codexModelButton = CreateSciFiButtonPositioned(_providerPanel.transform, "CodexModel", "Codex model: default", new Vector2(-120, -26), new Vector2(200, 26));
+        _codexModelLabel = _codexModelButton.GetComponentInChildren<Text>();
+        _codexModelButton.onClick.AddListener(() =>
+        {
+            _codexModel = CycleOption(_codexModel, CodexModelOptions);
+            UpdateAssistantSettingsUi();
+            StartCoroutine(SaveAssistantConfig());
+        });
 
-	        _codexEffortButton = CreateButton(_providerPanel.transform, "CodexEffort", "Effort: medium", new Vector2(-20, -160), new Vector2(240, 34));
-	        _codexEffortLabel = _codexEffortButton.GetComponentInChildren<Text>();
-	        _codexEffortButton.onClick.AddListener(() =>
-	        {
-	            _codexEffort = CycleOption(_codexEffort, CodexEffortOptions);
-	            UpdateAssistantSettingsUi();
-	            StartCoroutine(SaveAssistantConfig());
-	        });
+        _codexEffortButton = CreateSciFiButtonPositioned(_providerPanel.transform, "CodexEffort", "Effort: medium", new Vector2(120, -26), new Vector2(200, 26));
+        _codexEffortLabel = _codexEffortButton.GetComponentInChildren<Text>();
+        _codexEffortButton.onClick.AddListener(() =>
+        {
+            _codexEffort = CycleOption(_codexEffort, CodexEffortOptions);
+            UpdateAssistantSettingsUi();
+            StartCoroutine(SaveAssistantConfig());
+        });
 
-	        _claudeModelButton = CreateButton(_providerPanel.transform, "ClaudeModel", "Claude model: default", new Vector2(-20, -205), new Vector2(520, 34));
-	        _claudeModelLabel = _claudeModelButton.GetComponentInChildren<Text>();
-	        _claudeModelButton.onClick.AddListener(() =>
-	        {
-	            _claudeModel = CycleOption(_claudeModel, ClaudeModelOptions);
-	            UpdateAssistantSettingsUi();
-	            StartCoroutine(SaveAssistantConfig());
-	        });
+        _claudeModelButton = CreateSciFiButtonPositioned(_providerPanel.transform, "ClaudeModel", "Claude model: default", new Vector2(0, -62), new Vector2(420, 26));
+        _claudeModelLabel = _claudeModelButton.GetComponentInChildren<Text>();
+        _claudeModelButton.onClick.AddListener(() =>
+        {
+            _claudeModel = CycleOption(_claudeModel, ClaudeModelOptions);
+            UpdateAssistantSettingsUi();
+            StartCoroutine(SaveAssistantConfig());
+        });
 
-	        _providerPanel.SetActive(false);
+        _providerPanel.SetActive(false);
 
-	        SetWorldsSource(false);
-	    }
+        SetWorldsSource(false);
+    }
 
     private static GameObject CreatePanel(Transform parent, string name, Color bg)
     {
@@ -1879,7 +2414,7 @@ public class OwpBootstrap : MonoBehaviour
         var go = new GameObject(name);
         go.transform.SetParent(parent, false);
 
-        var rt = go.GetComponent<RectTransform>();
+        var rt = go.AddComponent<RectTransform>();
         rt.anchorMin = new Vector2(1, 1);
         rt.anchorMax = new Vector2(1, 1);
         rt.pivot = new Vector2(0.5f, 0.5f);

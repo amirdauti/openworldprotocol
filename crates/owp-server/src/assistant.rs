@@ -391,8 +391,9 @@ pub async fn companion_chat(
     prompt.push_str("- If the user requests an avatar change, set `avatar` to the FULL updated avatar object.\n");
     prompt.push_str("- If no avatar change is needed, set `avatar` to null.\n");
     prompt.push_str("- Keep colors as hex like \"#RRGGBB\" and height within 0.5..2.0.\n");
-    prompt.push_str("- The Unity client only renders the base humanoid plus `avatar.parts` primitives.\n");
-    prompt.push_str("- Only claim details that are explicitly encoded in `avatar.parts`.\n");
+    prompt.push_str("- The Unity client renders a simple base archetype inferred from `avatar.tags` (humanoid/robot/dragon/wizard/etc.) plus `avatar.parts` primitives.\n");
+    prompt.push_str("- Visual detail must be encoded via `avatar.tags` and `avatar.parts` (no real mesh/texture generation).\n");
+    prompt.push_str("- Only claim details that are explicitly encoded in `avatar.tags` and/or `avatar.parts`.\n");
     prompt.push_str("- If the user asks for something you can't literally model, approximate it with primitives (horns/stripes/gear) and be honest.\n");
     prompt.push_str("\nCurrent avatar JSON:\n");
     prompt.push_str(&current_avatar_json);
@@ -469,31 +470,253 @@ pub async fn companion_chat(
 }
 
 fn ensure_parts_for_prompt(avatar: &mut AvatarSpecV1, message: &str) {
-    if !avatar.parts.is_empty() {
-        return;
-    }
+    let had_parts = !avatar.parts.is_empty();
 
     let msg = message.to_lowercase();
     let primary = avatar.primary_color.clone();
     let secondary = avatar.secondary_color.clone();
     let mut parts: Vec<owp_protocol::AvatarPartV1> = Vec::new();
 
-    let wants_horns = msg.contains("horn") || msg.contains("antler");
-    let wants_glow = msg.contains("glow") || msg.contains("biolum") || msg.contains("neon");
-    let wants_tail = msg.contains("tail");
-    let wants_wings = msg.contains("wing");
-    let wants_braids = msg.contains("braid") || msg.contains("dread") || msg.contains("hair");
-    let wants_armor = msg.contains("armor") || msg.contains("armour") || msg.contains("shoulder");
-    let wants_stripes = msg.contains("stripe") || msg.contains("pattern");
+    fn ensure_tag(tags: &mut Vec<String>, tag: &str) {
+        if tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+            return;
+        }
+        tags.push(tag.to_string());
+    }
+
+    let wants_navi = msg.contains("na'vi")
+        || msg.contains("navi")
+        || msg.contains("pandora")
+        || (msg.contains("avatar") && msg.contains("movie"));
+
+    let wants_robot = msg.contains("robot")
+        || msg.contains("android")
+        || msg.contains("cyborg")
+        || msg.contains("droid")
+        || msg.contains("mech")
+        || msg.contains("mecha")
+        || msg.contains("cyberpunk");
+
+    let wants_dragon = msg.contains("dragon") || msg.contains("wyrm") || msg.contains("drake");
+    let wants_demon = msg.contains("demon") || msg.contains("devil") || msg.contains("infernal");
+    let wants_angel = msg.contains("angel") || msg.contains("seraph") || msg.contains("holy");
+
+    let wants_animal = msg.contains("cat")
+        || msg.contains("feline")
+        || msg.contains("fox")
+        || msg.contains("wolf")
+        || msg.contains("dog")
+        || msg.contains("canine");
+
+    let wants_knight = msg.contains("knight")
+        || msg.contains("warrior")
+        || msg.contains("soldier")
+        || msg.contains("space marine")
+        || msg.contains("samurai");
+
+    let wants_wizard = msg.contains("wizard")
+        || msg.contains("mage")
+        || msg.contains("sorcer")
+        || msg.contains("witch")
+        || msg.contains("necromancer");
+
+    if wants_navi {
+        ensure_tag(&mut avatar.tags, "navi");
+        ensure_tag(&mut avatar.tags, "biolum");
+    }
+    if wants_robot {
+        ensure_tag(&mut avatar.tags, "robot");
+    }
+    if wants_dragon {
+        ensure_tag(&mut avatar.tags, "dragon");
+    }
+    if wants_angel {
+        ensure_tag(&mut avatar.tags, "angel");
+    }
+    if wants_wizard {
+        ensure_tag(&mut avatar.tags, "wizard");
+    }
+    if wants_knight {
+        ensure_tag(&mut avatar.tags, "knight");
+    }
+    if wants_animal {
+        ensure_tag(&mut avatar.tags, "animal");
+    }
+
+    // If the model already provided parts, keep them, but still apply style tags.
+    if had_parts {
+        return;
+    }
+
+    let wants_horns = msg.contains("horn") || msg.contains("antler") || wants_dragon || wants_demon;
+    let wants_glow = msg.contains("glow") || msg.contains("biolum") || msg.contains("neon") || wants_robot;
+    let wants_tail = msg.contains("tail") || wants_animal || wants_dragon;
+    let wants_wings = msg.contains("wing") || wants_dragon || wants_angel;
+    let wants_braids = msg.contains("braid") || msg.contains("dread") || msg.contains("hair") || wants_navi;
+    let wants_armor = msg.contains("armor") || msg.contains("armour") || msg.contains("shoulder") || wants_robot || wants_knight;
+    let wants_stripes = msg.contains("stripe") || msg.contains("pattern") || wants_robot;
+
+    // "Prompt anything" friendly presets: map well-known fantasies to visible procedural parts.
+    let wants_glow = wants_glow || wants_navi;
+    let wants_tail = wants_tail || wants_navi;
+    let wants_braids = wants_braids || wants_navi;
+    let wants_stripes = wants_stripes || wants_navi;
+
+    if wants_navi {
+        parts.push(make_part(
+            "ear_left",
+            "head",
+            "capsule",
+            [-0.32, 0.02, 0.02],
+            [0.0, 0.0, 55.0],
+            [0.08, 0.25, 0.08],
+            secondary.clone(),
+            None,
+            None,
+        ));
+        parts.push(make_part(
+            "ear_right",
+            "head",
+            "capsule",
+            [0.32, 0.02, 0.02],
+            [0.0, 0.0, -55.0],
+            [0.08, 0.25, 0.08],
+            secondary.clone(),
+            None,
+            None,
+        ));
+        parts.push(make_part(
+            "eye_left",
+            "head",
+            "sphere",
+            [-0.12, 0.02, -0.24],
+            [0.0, 0.0, 0.0],
+            [0.06, 0.06, 0.06],
+            "#FFD36A".to_string(),
+            Some("#FFD36A".to_string()),
+            Some(1.6),
+        ));
+        parts.push(make_part(
+            "eye_right",
+            "head",
+            "sphere",
+            [0.12, 0.02, -0.24],
+            [0.0, 0.0, 0.0],
+            [0.06, 0.06, 0.06],
+            "#FFD36A".to_string(),
+            Some("#FFD36A".to_string()),
+            Some(1.6),
+        ));
+    }
+
+    if wants_animal && !wants_navi {
+        parts.push(make_part(
+            "ear_left",
+            "head",
+            "capsule",
+            [-0.26, 0.22, 0.02],
+            [0.0, 0.0, 35.0],
+            [0.09, 0.22, 0.09],
+            secondary.clone(),
+            None,
+            None,
+        ));
+        parts.push(make_part(
+            "ear_right",
+            "head",
+            "capsule",
+            [0.26, 0.22, 0.02],
+            [0.0, 0.0, -35.0],
+            [0.09, 0.22, 0.09],
+            secondary.clone(),
+            None,
+            None,
+        ));
+    }
+
+    if wants_robot {
+        parts.push(make_part(
+            "visor",
+            "head",
+            "cube",
+            [0.0, 0.02, -0.26],
+            [0.0, 0.0, 0.0],
+            [0.34, 0.1, 0.04],
+            "#0C1B2A".to_string(),
+            Some(primary.clone()),
+            Some(1.8),
+        ));
+        parts.push(make_part(
+            "antenna",
+            "head",
+            "cylinder",
+            [0.0, 0.32, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.03, 0.22, 0.03],
+            secondary.clone(),
+            Some(primary.clone()),
+            Some(1.2),
+        ));
+    }
+
+    if wants_angel {
+        parts.push(make_part(
+            "halo",
+            "head",
+            "cylinder",
+            [0.0, 0.42, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.55, 0.04, 0.55],
+            "#FFD36A".to_string(),
+            Some("#FFD36A".to_string()),
+            Some(2.0),
+        ));
+    }
+
+    if wants_wizard {
+        parts.push(make_part(
+            "staff",
+            "body",
+            "cylinder",
+            [0.65, 0.55, -0.15],
+            [0.0, 0.0, 15.0],
+            [0.6, 0.9, 0.6],
+            secondary.clone(),
+            Some(primary.clone()),
+            Some(0.8),
+        ));
+        parts.push(make_part(
+            "hat_brim",
+            "head",
+            "cylinder",
+            [0.0, 0.18, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.52, 0.05, 0.52],
+            secondary.clone(),
+            None,
+            None,
+        ));
+        parts.push(make_part(
+            "hat_top",
+            "head",
+            "cylinder",
+            [0.0, 0.32, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.9, 0.9, 0.9],
+            secondary.clone(),
+            None,
+            None,
+        ));
+    }
 
     if wants_horns {
         parts.push(make_part(
             "horn_left",
             "head",
             "capsule",
-            [-0.18, 0.18, 0.0],
+            [-0.25, 0.24, 0.06],
             [25.0, 0.0, 20.0],
-            [0.12, 0.35, 0.12],
+            [0.12, 0.45, 0.12],
             secondary.clone(),
             None,
             None,
@@ -502,9 +725,9 @@ fn ensure_parts_for_prompt(avatar: &mut AvatarSpecV1, message: &str) {
             "horn_right",
             "head",
             "capsule",
-            [0.18, 0.18, 0.0],
+            [0.25, 0.24, 0.06],
             [25.0, 0.0, -20.0],
-            [0.12, 0.35, 0.12],
+            [0.12, 0.45, 0.12],
             secondary.clone(),
             None,
             None,
@@ -548,7 +771,7 @@ fn ensure_parts_for_prompt(avatar: &mut AvatarSpecV1, message: &str) {
             "cube",
             [-0.35, 0.9, -0.1],
             [0.0, 0.0, 20.0],
-            [0.6, 0.12, 0.02],
+            [0.9, 0.55, 1.0],
             secondary.clone(),
             None,
             None,
@@ -559,7 +782,7 @@ fn ensure_parts_for_prompt(avatar: &mut AvatarSpecV1, message: &str) {
             "cube",
             [0.35, 0.9, -0.1],
             [0.0, 0.0, -20.0],
-            [0.6, 0.12, 0.02],
+            [0.9, 0.55, 1.0],
             secondary.clone(),
             None,
             None,
@@ -597,7 +820,7 @@ fn ensure_parts_for_prompt(avatar: &mut AvatarSpecV1, message: &str) {
                 &format!("stripe_{i}"),
                 "body",
                 "cube",
-                [-0.15 + i as f32 * 0.075, 0.85, 0.24],
+                [-0.15 + i as f32 * 0.075, 0.85, -0.56],
                 [0.0, 0.0, 0.0],
                 [0.02, 0.4, 0.02],
                 primary.clone(),
@@ -610,12 +833,12 @@ fn ensure_parts_for_prompt(avatar: &mut AvatarSpecV1, message: &str) {
     // If still empty, add a default detail kit for visual feedback.
     if parts.is_empty() {
         parts.push(make_part(
-            "backpack",
+            "chest_plate",
             "body",
             "cube",
-            [0.0, 0.85, -0.22],
+            [0.0, 0.85, -0.58],
             [0.0, 0.0, 0.0],
-            [0.2, 0.25, 0.08],
+            [0.26, 0.3, 0.1],
             secondary.clone(),
             None,
             None,
@@ -624,9 +847,9 @@ fn ensure_parts_for_prompt(avatar: &mut AvatarSpecV1, message: &str) {
             "belt",
             "body",
             "cylinder",
-            [0.0, 0.6, 0.0],
-            [90.0, 0.0, 0.0],
-            [0.28, 0.05, 0.28],
+            [0.0, 0.62, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.65, 0.06, 0.65],
             secondary.clone(),
             None,
             None,
@@ -662,7 +885,8 @@ fn make_part(
 
 fn enforce_honest_reply(reply: &str, avatar: &AvatarSpecV1, message: &str) -> String {
     let mut r = reply.trim().to_string();
-    let summary = summarize_parts(&avatar.parts);
+    let style = summarize_style(&avatar.tags);
+    let parts = summarize_parts(&avatar.parts);
     let msg = message.to_lowercase();
     let unrealistic = msg.contains("exactly like")
         || msg.contains("hyper-real")
@@ -678,12 +902,53 @@ fn enforce_honest_reply(reply: &str, avatar: &AvatarSpecV1, message: &str) -> St
         );
     }
 
-    if !summary.is_empty() {
-        r = format!("{r} Rendered: {summary}.");
-    } else {
-        r = format!("{r} Rendered: base body only.");
-    }
+    let rendered = match (style.is_empty(), parts.is_empty()) {
+        (true, true) => "base body only".to_string(),
+        (false, true) => style,
+        (true, false) => parts,
+        (false, false) => format!("{style}; {parts}"),
+    };
+    r = format!("{r} Rendered: {rendered}.");
     r
+}
+
+fn summarize_style(tags: &[String]) -> String {
+    if tags.is_empty() {
+        return String::new();
+    }
+    let blob = tags
+        .iter()
+        .map(|t| t.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let mut out = Vec::new();
+    if blob.contains("robot") || blob.contains("cyborg") || blob.contains("android") {
+        out.push("robot".to_string());
+    }
+    if blob.contains("navi") || blob.contains("na'vi") {
+        out.push("na'vi".to_string());
+    }
+    if blob.contains("dragon") {
+        out.push("dragon".to_string());
+    }
+    if blob.contains("angel") {
+        out.push("angel".to_string());
+    }
+    if blob.contains("wizard") || blob.contains("mage") {
+        out.push("wizard".to_string());
+    }
+    if blob.contains("knight") {
+        out.push("knight".to_string());
+    }
+    if blob.contains("animal") {
+        out.push("animal".to_string());
+    }
+    if blob.contains("biolum") || blob.contains("glow") || blob.contains("neon") {
+        out.push("glow".to_string());
+    }
+
+    out.join(", ")
 }
 
 fn summarize_parts(parts: &[owp_protocol::AvatarPartV1]) -> String {
