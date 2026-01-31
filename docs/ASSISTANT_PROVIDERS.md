@@ -27,9 +27,19 @@ Example shape:
 
 ```json
 {
-  "provider": "codex"
+  "provider": "codex",
+  "codex_model": "gpt-5.2-codex",
+  "codex_reasoning_effort": "xhigh",
+  "claude_model": "sonnet"
 }
 ```
+
+Notes:
+- `codex_model` is passed to `codex exec --model <MODEL>` (string).
+- `codex_reasoning_effort` is passed to Codex via `-c model_reasoning_effort="low|medium|high|xhigh"`.
+  - The Unity UI uses `very_high` but stores/sends `xhigh`.
+- `claude_model` is passed to Claude via `claude --model <MODEL>` (string).
+  - Common aliases include `haiku`, `sonnet`, `opus` (availability varies by account).
 
 ## Switching providers
 
@@ -47,9 +57,15 @@ The local server should expose a host-only endpoint to report:
 
 This is used by the Unity client to present “ready / not ready” status.
 
-Current admin API (prototype):
-- `GET /assistant/status` → returns current provider + install checks
+Current admin API:
+- `GET /assistant/status` → current provider + install checks
 - `POST /assistant/provider` → sets provider (`codex` or `claude`)
+- `GET /assistant/config` → reads provider/model settings
+- `POST /assistant/config` → updates provider/model settings
+- `POST /assistant/chat` → companion chat backed by local CLI; returns `{ reply, avatar? }`
+
+`POST /assistant/chat` also persists chat history under:
+- `~/.owp/profiles/<profile_id>/companion_history.json`
 
 ## Execution constraints (stability)
 

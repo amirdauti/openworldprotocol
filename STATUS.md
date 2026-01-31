@@ -10,34 +10,34 @@ Current focus: **Milestone A — Foundations**
 - [x] Progress docs (`README.md`, `ROADMAP.md`, `STATUS.md`, protocol/architecture/security docs)
 
 ### Protocol + SDK
-- [ ] Protocol spec v0.1 (handshake + core messages)
+- [~] Protocol spec v0.1 (handshake + core messages)
 - [~] Rust `owp-protocol` crate (manifest + directory types scaffolded)
 - [ ] Compatibility tests across versions
-- [~] Handshake message framing + HELLO/WELCOME
+- [x] Handshake message framing + HELLO/WELCOME
 
 ### Rust world server
-- [ ] Server CLI: create world / run server / config
-- [~] Host admin API (local-only) for listing worlds + attaching token info
-- [ ] Persistence layout under `~/.owp/worlds/<world_id>/`
+- [~] Server CLI: create world / run server / config
+- [x] Host admin API (local-only) for listing worlds + attaching token info + assistant endpoints
+- [~] Persistence layout under `~/.owp/worlds/<world_id>/`
 - [~] Listen on configured port(s)
-- [~] Game port TCP listener (handshake-only)
+- [x] Game port TCP listener (handshake-only)
 - [ ] Chunk streaming skeleton
 - [~] Host-only admin permissions (generation jobs)
 
 ### Unity client
 - [ ] Home screen + quick-join connect string
 - [ ] Universe map (local list first)
-- [ ] Handshake implementation
+- [x] Handshake implementation
 - [ ] Chunk/entity streaming + basic rendering loop
-- [ ] Chat
+- [~] Chat (Companion chat implemented; in-world chat TBD)
 - [x] Spawn local `owp-server` process (one-click host)
 - [~] Avatar preview + customization scene
-- [~] AI companion (“orb”) UI + provider selection/settings
+- [x] AI companion (“orb”) UI + provider selection/settings (models + reasoning effort)
 
 ### Generation (local Claude/Codex)
 - [ ] World workspace layout + manifest format
-- [~] Claude CLI adapter (cwd-based)
-- [~] Codex CLI adapter (cwd-based)
+- [~] Claude CLI adapter (structured output; avatar + companion chat)
+- [~] Codex CLI adapter (structured output; avatar + companion chat)
 - [ ] Job queue + timeouts + output size limits
 
 ### Discovery

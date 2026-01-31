@@ -23,6 +23,9 @@ Requirements:
 - Basic customization (skin tone, hair, outfit presets, colors)
 - Save/load local profile
 
+Implementation note (current):
+- The avatar is a procedural placeholder; “prompt anything” visuals require either a kitbash library (VRM) or an eventual text-to-3D pipeline.
+
 ## AI companion (“orb”)
 
 The top-right UI element is a futuristic “floating blob/orb” that opens a chat panel.
@@ -44,6 +47,10 @@ In Settings:
 - allow switching between Codex and Claude
 - show “installed / not installed” and auth status
 - switching should not break existing worlds; it only affects new generation jobs
+
+Also in Settings (MVP):
+- allow selecting the **model** for Codex and Claude
+- allow selecting Codex **reasoning effort** (low/medium/high/xhigh)
 
 ### Assistant onboarding message
 
@@ -87,4 +94,3 @@ On client startup:
 - if server fails to start, show a clear error and a “View logs” button
 
 The long-term goal is “one-click host”.
-
