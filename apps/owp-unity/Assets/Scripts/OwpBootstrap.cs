@@ -132,6 +132,7 @@ public class OwpBootstrap : MonoBehaviour
                 CreateNoWindow = true,
                 WorkingDirectory = ResolveRepoRoot()
             };
+            EnsureChildProcessPath(psi);
 
             _serverProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
             _serverProcess.OutputDataReceived += (_, e) => { if (!string.IsNullOrEmpty(e.Data)) UnityEngine.Debug.Log(e.Data); };
@@ -148,6 +149,38 @@ public class OwpBootstrap : MonoBehaviour
             UnityEngine.Debug.LogError(ex);
             AppendLog("Server: failed to spawn process.");
         }
+    }
+
+    private static void EnsureChildProcessPath(ProcessStartInfo psi)
+    {
+        // Unity-launched processes often have a minimal PATH on macOS, so `claude` / `codex` may not be found.
+        var current = Environment.GetEnvironmentVariable("PATH") ?? "";
+        if (psi.EnvironmentVariables.ContainsKey("PATH"))
+        {
+            current = psi.EnvironmentVariables["PATH"] ?? current;
+        }
+
+        var candidatePaths = new[]
+        {
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cargo", "bin"),
+        };
+
+        var next = current;
+        foreach (var p in candidatePaths)
+        {
+            if (string.IsNullOrWhiteSpace(p)) continue;
+            if (next.Contains(p)) continue;
+            next = string.IsNullOrEmpty(next) ? p : (next + Path.PathSeparator + p);
+        }
+
+        psi.EnvironmentVariables["PATH"] = next;
     }
 
     private static string ResolveRepoRoot()
@@ -195,6 +228,13 @@ public class OwpBootstrap : MonoBehaviour
         var provider = status.provider ?? "";
         SetProviderButtonLabel(provider);
 
+        var providerInstalled = IsProviderInstalled(status, provider);
+        if (!string.IsNullOrEmpty(provider) && !providerInstalled)
+        {
+            forceShowProviderPanel = true;
+            AppendLog($"Assistant: provider '{provider}' not found. Install it or pick another provider.");
+        }
+
         if (string.IsNullOrEmpty(provider) || forceShowProviderPanel)
         {
             _providerPanel.SetActive(true);
@@ -206,6 +246,18 @@ public class OwpBootstrap : MonoBehaviour
             _providerPanel.SetActive(false);
             AppendLog($"Assistant: provider set to {provider}.");
         }
+    }
+
+    private static bool IsProviderInstalled(AssistantStatus status, string provider)
+    {
+        if (string.IsNullOrEmpty(provider)) return true;
+        if (status == null || status.providers == null) return true;
+        foreach (var p in status.providers)
+        {
+            if (p == null) continue;
+            if (p.id == provider) return p.installed;
+        }
+        return true;
     }
 
     private void UpdateProviderButtons(AssistantStatus status)
@@ -264,7 +316,13 @@ public class OwpBootstrap : MonoBehaviour
 
         if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok)
         {
-            AppendLog("Assistant: avatar generation failed.");
+            var status = task.Status == TaskStatus.RanToCompletion ? task.Result.status : 0;
+            var detail = task.Status == TaskStatus.RanToCompletion ? (task.Result.text ?? "") : (task.Exception?.GetBaseException().Message ?? "");
+            detail = (detail ?? "").Trim();
+            if (detail.Length > 180) detail = detail.Substring(0, 180) + "…";
+            AppendLog(detail.Length == 0
+                ? $"Assistant: avatar generation failed ({status})."
+                : $"Assistant: avatar generation failed ({status}) → {detail}");
             yield break;
         }
 
