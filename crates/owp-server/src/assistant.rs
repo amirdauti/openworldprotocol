@@ -391,8 +391,9 @@ pub async fn companion_chat(
     prompt.push_str("- If the user requests an avatar change, set `avatar` to the FULL updated avatar object.\n");
     prompt.push_str("- If no avatar change is needed, set `avatar` to null.\n");
     prompt.push_str("- Keep colors as hex like \"#RRGGBB\" and height within 0.5..2.0.\n");
-    prompt.push_str("- The Unity client only renders the base humanoid plus `avatar.parts` primitives. Only claim details you actually encode in `avatar.parts`.\n");
-    prompt.push_str("- If the user asks for something you can't literally model, approximate it with primitives (horns/stripes/gear) and explain briefly.\n");
+    prompt.push_str("- The Unity client only renders the base humanoid plus `avatar.parts` primitives.\n");
+    prompt.push_str("- Only claim details that are explicitly encoded in `avatar.parts`.\n");
+    prompt.push_str("- If the user asks for something you can't literally model, approximate it with primitives (horns/stripes/gear) and be honest.\n");
     prompt.push_str("\nCurrent avatar JSON:\n");
     prompt.push_str(&current_avatar_json);
     prompt.push_str("\n\nConversation:\n");
@@ -445,7 +446,9 @@ pub async fn companion_chat(
     if let Some(ref mut a) = out.avatar {
         a.version = "v1".to_string();
         avatar_mod::normalize_avatar(a);
+        ensure_parts_for_prompt(a, message);
         avatar_mod::save_avatar(store, profile_id, a).context("save avatar")?;
+        out.reply = enforce_honest_reply(&out.reply, a, message);
     }
 
     // Append to history and persist
@@ -463,4 +466,252 @@ pub async fn companion_chat(
     save_companion_history(store, profile_id, &history).ok();
 
     Ok(out)
+}
+
+fn ensure_parts_for_prompt(avatar: &mut AvatarSpecV1, message: &str) {
+    if !avatar.parts.is_empty() {
+        return;
+    }
+
+    let msg = message.to_lowercase();
+    let primary = avatar.primary_color.clone();
+    let secondary = avatar.secondary_color.clone();
+    let mut parts: Vec<owp_protocol::AvatarPartV1> = Vec::new();
+
+    let wants_horns = msg.contains("horn") || msg.contains("antler");
+    let wants_glow = msg.contains("glow") || msg.contains("biolum") || msg.contains("neon");
+    let wants_tail = msg.contains("tail");
+    let wants_wings = msg.contains("wing");
+    let wants_braids = msg.contains("braid") || msg.contains("dread") || msg.contains("hair");
+    let wants_armor = msg.contains("armor") || msg.contains("armour") || msg.contains("shoulder");
+    let wants_stripes = msg.contains("stripe") || msg.contains("pattern");
+
+    if wants_horns {
+        parts.push(make_part(
+            "horn_left",
+            "head",
+            "capsule",
+            [-0.18, 0.18, 0.0],
+            [25.0, 0.0, 20.0],
+            [0.12, 0.35, 0.12],
+            secondary.clone(),
+            None,
+            None,
+        ));
+        parts.push(make_part(
+            "horn_right",
+            "head",
+            "capsule",
+            [0.18, 0.18, 0.0],
+            [25.0, 0.0, -20.0],
+            [0.12, 0.35, 0.12],
+            secondary.clone(),
+            None,
+            None,
+        ));
+    }
+
+    if wants_braids {
+        for i in 0..4 {
+            parts.push(make_part(
+                &format!("braid_{i}"),
+                "head",
+                "cylinder",
+                [-0.15 + i as f32 * 0.1, -0.05, -0.12],
+                [0.0, 0.0, 90.0],
+                [0.04, 0.25, 0.04],
+                secondary.clone(),
+                None,
+                None,
+            ));
+        }
+    }
+
+    if wants_tail {
+        parts.push(make_part(
+            "tail",
+            "body",
+            "cylinder",
+            [0.0, 0.2, -0.35],
+            [15.0, 0.0, 0.0],
+            [0.06, 0.6, 0.06],
+            primary.clone(),
+            None,
+            None,
+        ));
+    }
+
+    if wants_wings {
+        parts.push(make_part(
+            "wing_left",
+            "body",
+            "cube",
+            [-0.35, 0.9, -0.1],
+            [0.0, 0.0, 20.0],
+            [0.6, 0.12, 0.02],
+            secondary.clone(),
+            None,
+            None,
+        ));
+        parts.push(make_part(
+            "wing_right",
+            "body",
+            "cube",
+            [0.35, 0.9, -0.1],
+            [0.0, 0.0, -20.0],
+            [0.6, 0.12, 0.02],
+            secondary.clone(),
+            None,
+            None,
+        ));
+    }
+
+    if wants_armor {
+        parts.push(make_part(
+            "shoulder_left",
+            "body",
+            "cube",
+            [-0.22, 1.0, 0.0],
+            [0.0, 0.0, 15.0],
+            [0.25, 0.08, 0.18],
+            secondary.clone(),
+            None,
+            None,
+        ));
+        parts.push(make_part(
+            "shoulder_right",
+            "body",
+            "cube",
+            [0.22, 1.0, 0.0],
+            [0.0, 0.0, -15.0],
+            [0.25, 0.08, 0.18],
+            secondary.clone(),
+            None,
+            None,
+        ));
+    }
+
+    if wants_glow || wants_stripes {
+        for i in 0..5 {
+            parts.push(make_part(
+                &format!("stripe_{i}"),
+                "body",
+                "cube",
+                [-0.15 + i as f32 * 0.075, 0.85, 0.24],
+                [0.0, 0.0, 0.0],
+                [0.02, 0.4, 0.02],
+                primary.clone(),
+                Some(primary.clone()),
+                Some(2.5),
+            ));
+        }
+    }
+
+    // If still empty, add a default detail kit for visual feedback.
+    if parts.is_empty() {
+        parts.push(make_part(
+            "backpack",
+            "body",
+            "cube",
+            [0.0, 0.85, -0.22],
+            [0.0, 0.0, 0.0],
+            [0.2, 0.25, 0.08],
+            secondary.clone(),
+            None,
+            None,
+        ));
+        parts.push(make_part(
+            "belt",
+            "body",
+            "cylinder",
+            [0.0, 0.6, 0.0],
+            [90.0, 0.0, 0.0],
+            [0.28, 0.05, 0.28],
+            secondary.clone(),
+            None,
+            None,
+        ));
+    }
+
+    avatar.parts = parts;
+}
+
+fn make_part(
+    id: &str,
+    attach: &str,
+    primitive: &str,
+    position: [f32; 3],
+    rotation: [f32; 3],
+    scale: [f32; 3],
+    color: String,
+    emission_color: Option<String>,
+    emission_strength: Option<f32>,
+) -> owp_protocol::AvatarPartV1 {
+    owp_protocol::AvatarPartV1 {
+        id: id.to_string(),
+        attach: attach.to_string(),
+        primitive: primitive.to_string(),
+        position,
+        rotation,
+        scale,
+        color,
+        emission_color,
+        emission_strength,
+    }
+}
+
+fn enforce_honest_reply(reply: &str, avatar: &AvatarSpecV1, message: &str) -> String {
+    let mut r = reply.trim().to_string();
+    let summary = summarize_parts(&avatar.parts);
+    let msg = message.to_lowercase();
+    let unrealistic = msg.contains("exactly like")
+        || msg.contains("hyper-real")
+        || msg.contains("cinematic")
+        || msg.contains("photoreal")
+        || msg.contains("movie")
+        || msg.contains("perfect");
+
+    if unrealistic {
+        r = format!(
+            "I can’t create fully realistic meshes yet; I approximated with simple shapes. {}",
+            r
+        );
+    }
+
+    if !summary.is_empty() {
+        r = format!("{r} Rendered: {summary}.");
+    } else {
+        r = format!("{r} Rendered: base body only.");
+    }
+    r
+}
+
+fn summarize_parts(parts: &[owp_protocol::AvatarPartV1]) -> String {
+    if parts.is_empty() {
+        return String::new();
+    }
+    let mut horns = 0;
+    let mut stripes = 0;
+    let mut wings = 0;
+    let mut tail = 0;
+    let mut armor = 0;
+    let mut braids = 0;
+    for p in parts {
+        let id = p.id.to_lowercase();
+        if id.contains("horn") { horns += 1; }
+        if id.contains("stripe") { stripes += 1; }
+        if id.contains("wing") { wings += 1; }
+        if id.contains("tail") { tail += 1; }
+        if id.contains("shoulder") || id.contains("armor") { armor += 1; }
+        if id.contains("braid") { braids += 1; }
+    }
+    let mut out = Vec::new();
+    if horns > 0 { out.push(format!("{horns} horns")); }
+    if stripes > 0 { out.push(format!("{stripes} glow stripes")); }
+    if wings > 0 { out.push(format!("{wings} wings")); }
+    if tail > 0 { out.push("tail".to_string()); }
+    if armor > 0 { out.push("shoulder armor".to_string()); }
+    if braids > 0 { out.push(format!("{braids} braids")); }
+    if out.is_empty() { out.push(format!("{} parts", parts.len())); }
+    out.join(", ")
 }

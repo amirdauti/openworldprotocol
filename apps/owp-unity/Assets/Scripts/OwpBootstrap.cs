@@ -1690,6 +1690,381 @@ public class OwpBootstrap : MonoBehaviour
         }
     }
 
+    // ========== SCI-FI UI COMPONENTS ==========
+
+    private static GameObject CreateSciFiPanel(Transform parent, string name, Color bgColor, Color borderColor)
+    {
+        var panel = CreatePanel(parent, name, bgColor);
+
+        // Add glowing border outline
+        var borderObj = new GameObject($"{name}_Border");
+        borderObj.transform.SetParent(panel.transform, false);
+        var borderImg = borderObj.AddComponent<Image>();
+        borderImg.color = borderColor;
+
+        var borderRt = borderObj.GetComponent<RectTransform>();
+        borderRt.anchorMin = Vector2.zero;
+        borderRt.anchorMax = Vector2.one;
+        borderRt.offsetMin = Vector2.zero;
+        borderRt.offsetMax = Vector2.zero;
+
+        // Create inner panel to simulate border (outer border effect)
+        var innerObj = new GameObject($"{name}_Inner");
+        innerObj.transform.SetParent(panel.transform, false);
+        var innerImg = innerObj.AddComponent<Image>();
+        innerImg.color = bgColor;
+
+        var innerRt = innerObj.GetComponent<RectTransform>();
+        innerRt.anchorMin = Vector2.zero;
+        innerRt.anchorMax = Vector2.one;
+        innerRt.offsetMin = new Vector2(2, 2);
+        innerRt.offsetMax = new Vector2(-2, -2);
+
+        // Add scanline overlay for holographic effect
+        var scanlineObj = new GameObject($"{name}_Scanlines");
+        scanlineObj.transform.SetParent(panel.transform, false);
+        var scanlineImg = scanlineObj.AddComponent<Image>();
+        scanlineImg.color = new Color(borderColor.r, borderColor.g, borderColor.b, 0.05f);
+
+        var scanlineRt = scanlineObj.GetComponent<RectTransform>();
+        scanlineRt.anchorMin = Vector2.zero;
+        scanlineRt.anchorMax = Vector2.one;
+        scanlineRt.offsetMin = Vector2.zero;
+        scanlineRt.offsetMax = Vector2.zero;
+
+        return panel;
+    }
+
+    private static Text CreateSciFiText(Transform parent, string name, string value, int fontSize, TextAnchor align, Color color)
+    {
+        var text = CreateTextLayout(parent, name, value, fontSize, align);
+        text.color = color;
+        text.fontStyle = FontStyle.Bold;
+        return text;
+    }
+
+    private static Text CreateSciFiTextPositioned(Transform parent, string name, string value, Vector2 anchoredPos, Vector2 size, Color color)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        var rt = go.AddComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = anchoredPos;
+        rt.sizeDelta = size;
+
+        var text = go.AddComponent<Text>();
+        text.font = GetDefaultFont();
+        text.text = value;
+        text.fontSize = 14;
+        text.alignment = TextAnchor.MiddleCenter;
+        text.color = color;
+        text.fontStyle = FontStyle.Bold;
+
+        return text;
+    }
+
+    private static Button CreateSciFiButton(Transform parent, string name, string label, float width, float height, float flexibleWidth = 0)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+
+        var bg = go.AddComponent<Image>();
+        bg.color = new Color(0.08f, 0.15f, 0.2f, 0.85f);
+
+        var borderObj = new GameObject($"{name}_Border");
+        borderObj.transform.SetParent(go.transform, false);
+        var borderImg = borderObj.AddComponent<Image>();
+        borderImg.color = new Color(0f, 0.9f, 1f, 0.7f);
+
+        var borderRt = borderObj.GetComponent<RectTransform>();
+        borderRt.anchorMin = Vector2.zero;
+        borderRt.anchorMax = Vector2.one;
+        borderRt.offsetMin = Vector2.zero;
+        borderRt.offsetMax = Vector2.zero;
+
+        var innerObj = new GameObject($"{name}_Inner");
+        innerObj.transform.SetParent(go.transform, false);
+        var innerImg = innerObj.AddComponent<Image>();
+        innerImg.color = new Color(0.08f, 0.15f, 0.2f, 0.95f);
+
+        var innerRt = innerObj.GetComponent<RectTransform>();
+        innerRt.anchorMin = Vector2.zero;
+        innerRt.anchorMax = Vector2.one;
+        innerRt.offsetMin = new Vector2(1.5f, 1.5f);
+        innerRt.offsetMax = new Vector2(-1.5f, -1.5f);
+
+        var btn = go.AddComponent<Button>();
+
+        var text = CreateTextLayout(innerObj.transform, $"{name}_Text", label, 13, TextAnchor.MiddleCenter);
+        text.color = new Color(0.5f, 1f, 1f, 1f);
+        text.fontStyle = FontStyle.Bold;
+
+        var trt = text.GetComponent<RectTransform>();
+        trt.anchorMin = Vector2.zero;
+        trt.anchorMax = Vector2.one;
+        trt.offsetMin = new Vector2(8, 4);
+        trt.offsetMax = new Vector2(-8, -4);
+
+        var le = go.AddComponent<LayoutElement>();
+        if (width > 0) le.preferredWidth = width;
+        if (height > 0) le.preferredHeight = height;
+        if (flexibleWidth > 0) le.flexibleWidth = flexibleWidth;
+
+        return btn;
+    }
+
+    private static Button CreateSciFiButtonPositioned(Transform parent, string name, string label, Vector2 anchoredPos, Vector2 size)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+
+        var bg = go.AddComponent<Image>();
+        bg.color = new Color(0.08f, 0.15f, 0.2f, 0.85f);
+
+        var rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = anchoredPos;
+        rt.sizeDelta = size;
+
+        var borderObj = new GameObject($"{name}_Border");
+        borderObj.transform.SetParent(go.transform, false);
+        var borderImg = borderObj.AddComponent<Image>();
+        borderImg.color = new Color(0f, 1f, 0.6f, 0.7f);
+
+        var borderRt = borderObj.GetComponent<RectTransform>();
+        borderRt.anchorMin = Vector2.zero;
+        borderRt.anchorMax = Vector2.one;
+        borderRt.offsetMin = Vector2.zero;
+        borderRt.offsetMax = Vector2.zero;
+
+        var innerObj = new GameObject($"{name}_Inner");
+        innerObj.transform.SetParent(go.transform, false);
+        var innerImg = innerObj.AddComponent<Image>();
+        innerImg.color = new Color(0.08f, 0.15f, 0.2f, 0.95f);
+
+        var innerRt = innerObj.GetComponent<RectTransform>();
+        innerRt.anchorMin = Vector2.zero;
+        innerRt.anchorMax = Vector2.one;
+        innerRt.offsetMin = new Vector2(1.5f, 1.5f);
+        innerRt.offsetMax = new Vector2(-1.5f, -1.5f);
+
+        var btn = go.AddComponent<Button>();
+
+        var textObj = new GameObject($"{name}_Text");
+        textObj.transform.SetParent(innerObj.transform, false);
+
+        var text = textObj.AddComponent<Text>();
+        text.font = GetDefaultFont();
+        text.text = label;
+        text.fontSize = 14;
+        text.alignment = TextAnchor.MiddleCenter;
+        text.color = new Color(0.5f, 1f, 0.9f, 1f);
+        text.fontStyle = FontStyle.Bold;
+
+        var trt = text.GetComponent<RectTransform>();
+        trt.anchorMin = Vector2.zero;
+        trt.anchorMax = Vector2.one;
+        trt.offsetMin = new Vector2(8, 4);
+        trt.offsetMax = new Vector2(-8, -4);
+
+        return btn;
+    }
+
+    private static Button CreateSciFiOrbButton(Transform parent, string name, string label, Vector2 anchoredPos, Vector2 size)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+
+        var rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(1, 1);
+        rt.anchorMax = new Vector2(1, 1);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = anchoredPos;
+        rt.sizeDelta = size;
+
+        var bg = go.AddComponent<Image>();
+        bg.color = new Color(0.5f, 0f, 1f, 0.6f);
+
+        var btn = go.AddComponent<Button>();
+
+        var textObj = new GameObject($"{name}_Text");
+        textObj.transform.SetParent(go.transform, false);
+
+        var text = textObj.AddComponent<Text>();
+        text.font = GetDefaultFont();
+        text.text = label;
+        text.fontSize = 32;
+        text.alignment = TextAnchor.MiddleCenter;
+        text.color = new Color(1f, 1f, 1f, 1f);
+        text.fontStyle = FontStyle.Bold;
+
+        var trt = text.GetComponent<RectTransform>();
+        trt.anchorMin = Vector2.zero;
+        trt.anchorMax = Vector2.one;
+        trt.offsetMin = Vector2.zero;
+        trt.offsetMax = Vector2.zero;
+
+        return btn;
+    }
+
+    private static InputField CreateSciFiInput(Transform parent, string name, string placeholderText, float width, float height, float flexibleWidth = 0)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+
+        var borderImg = go.AddComponent<Image>();
+        borderImg.color = new Color(0f, 0.8f, 1f, 0.5f);
+
+        var innerObj = new GameObject($"{name}_Inner");
+        innerObj.transform.SetParent(go.transform, false);
+        var innerImg = innerObj.AddComponent<Image>();
+        innerImg.color = new Color(0.05f, 0.1f, 0.15f, 0.8f);
+
+        var innerRt = innerObj.GetComponent<RectTransform>();
+        innerRt.anchorMin = Vector2.zero;
+        innerRt.anchorMax = Vector2.one;
+        innerRt.offsetMin = new Vector2(1.5f, 1.5f);
+        innerRt.offsetMax = new Vector2(-1.5f, -1.5f);
+
+        var input = go.AddComponent<InputField>();
+        var le = go.AddComponent<LayoutElement>();
+        if (width > 0) le.preferredWidth = width;
+        if (height > 0) le.preferredHeight = height;
+        if (flexibleWidth > 0) le.flexibleWidth = flexibleWidth;
+
+        var placeholder = CreateTextLayout(innerObj.transform, "Placeholder", placeholderText, 13, TextAnchor.MiddleLeft);
+        placeholder.color = new Color(0.5f, 0.8f, 1f, 0.4f);
+        placeholder.fontStyle = FontStyle.Italic;
+
+        var text = CreateTextLayout(innerObj.transform, "Text", "", 13, TextAnchor.MiddleLeft);
+        text.color = new Color(0.7f, 1f, 1f, 1f);
+        text.fontStyle = FontStyle.Bold;
+        text.supportRichText = false;
+
+        var prt = placeholder.GetComponent<RectTransform>();
+        prt.anchorMin = Vector2.zero;
+        prt.anchorMax = Vector2.one;
+        prt.offsetMin = new Vector2(12, 6);
+        prt.offsetMax = new Vector2(-12, -6);
+
+        var trt = text.GetComponent<RectTransform>();
+        trt.anchorMin = Vector2.zero;
+        trt.anchorMax = Vector2.one;
+        trt.offsetMin = new Vector2(12, 6);
+        trt.offsetMax = new Vector2(-12, -6);
+
+        input.textComponent = text;
+        input.placeholder = placeholder;
+        input.lineType = InputField.LineType.SingleLine;
+        input.characterLimit = 256;
+
+        return input;
+    }
+
+    private static ScrollView CreateSciFiScrollView(Transform parent, string name)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+
+        var bg = go.AddComponent<Image>();
+        bg.color = new Color(0, 0.05f, 0.1f, 0.4f);
+
+        var scrollRect = go.AddComponent<ScrollRect>();
+        var mask = go.AddComponent<RectMask2D>();
+
+        var viewport = new GameObject("Viewport");
+        viewport.transform.SetParent(go.transform, false);
+        var viewportRt = viewport.AddComponent<RectTransform>();
+        viewportRt.anchorMin = Vector2.zero;
+        viewportRt.anchorMax = Vector2.one;
+        viewportRt.offsetMin = new Vector2(4, 4);
+        viewportRt.offsetMax = new Vector2(-4, -4);
+        viewport.AddComponent<RectMask2D>();
+
+        var content = new GameObject("Content");
+        content.transform.SetParent(viewport.transform, false);
+        var contentRt = content.AddComponent<RectTransform>();
+        contentRt.anchorMin = new Vector2(0, 1);
+        contentRt.anchorMax = new Vector2(1, 1);
+        contentRt.pivot = new Vector2(0.5f, 1);
+        contentRt.offsetMin = Vector2.zero;
+        contentRt.offsetMax = Vector2.zero;
+
+        var vlg = content.AddComponent<VerticalLayoutGroup>();
+        vlg.childControlWidth = true;
+        vlg.childControlHeight = true;
+        vlg.childForceExpandWidth = true;
+        vlg.childForceExpandHeight = false;
+        vlg.spacing = 6;
+
+        var csf = content.AddComponent<ContentSizeFitter>();
+        csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        scrollRect.content = contentRt;
+        scrollRect.viewport = viewportRt;
+        scrollRect.horizontal = false;
+        scrollRect.vertical = true;
+        scrollRect.movementType = ScrollRect.MovementType.Clamped;
+        scrollRect.scrollSensitivity = 25;
+
+        return new ScrollView { scrollRect = scrollRect, content = contentRt };
+    }
+
+    private struct ChatScrollView
+    {
+        public ScrollRect scrollRect;
+        public Text text;
+    }
+
+    private static ChatScrollView CreateSciFiChatScroll(Transform parent, string name)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+
+        var bg = go.AddComponent<Image>();
+        bg.color = new Color(0.1f, 0f, 0.1f, 0.4f);
+
+        var scrollRect = go.AddComponent<ScrollRect>();
+        var mask = go.AddComponent<RectMask2D>();
+
+        var viewport = new GameObject("Viewport");
+        viewport.transform.SetParent(go.transform, false);
+        var viewportRt = viewport.AddComponent<RectTransform>();
+        viewportRt.anchorMin = Vector2.zero;
+        viewportRt.anchorMax = Vector2.one;
+        viewportRt.offsetMin = new Vector2(8, 8);
+        viewportRt.offsetMax = new Vector2(-8, -8);
+        viewport.AddComponent<RectMask2D>();
+
+        var content = new GameObject("Content");
+        content.transform.SetParent(viewport.transform, false);
+        var contentRt = content.AddComponent<RectTransform>();
+        contentRt.anchorMin = new Vector2(0, 0);
+        contentRt.anchorMax = new Vector2(1, 1);
+        contentRt.pivot = new Vector2(0, 0);
+        contentRt.offsetMin = Vector2.zero;
+        contentRt.offsetMax = Vector2.zero;
+
+        var text = content.AddComponent<Text>();
+        text.font = GetDefaultFont();
+        text.fontSize = 13;
+        text.color = new Color(0.9f, 0.7f, 1f, 1f);
+        text.verticalOverflow = VerticalWrapMode.Overflow;
+        text.horizontalOverflow = HorizontalWrapMode.Wrap;
+
+        scrollRect.content = contentRt;
+        scrollRect.viewport = viewportRt;
+        scrollRect.horizontal = false;
+        scrollRect.vertical = true;
+        scrollRect.movementType = ScrollRect.MovementType.Clamped;
+
+        return new ChatScrollView { scrollRect = scrollRect, text = text };
+    }
+
     private void OnApplicationQuit()
     {
         KillChildProcesses();
