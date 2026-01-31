@@ -93,6 +93,8 @@ public class OwpBootstrap : MonoBehaviour
     private Transform _worldsListRoot;
     private InputField _worldPromptInput;
     private Button _generateWorldButton;
+    private Button _avatarViewButton;
+    private Button _worldViewButton;
     private Button _hostConnectButton;
     private Text _selectedWorldLabel;
     private bool _worldsUseOnChain;
@@ -102,6 +104,7 @@ public class OwpBootstrap : MonoBehaviour
     private int _selectedWorldPort;
 
     private GameObject _worldRoot;
+    private WorldPlan _lastWorldPlan;
     private GameObject _gltfCacheRoot;
     private readonly System.Collections.Generic.Dictionary<string, GameObject> _gltfPrefabCache =
         new System.Collections.Generic.Dictionary<string, GameObject>(StringComparer.OrdinalIgnoreCase);
@@ -142,6 +145,7 @@ public class OwpBootstrap : MonoBehaviour
         CreatePlaceholderAvatar();
         EnsureAvatarShowcaseScene();
         CreateUi();
+        EnterAvatarView();
 
         StartCoroutine(BootSequence());
     }
@@ -2133,6 +2137,8 @@ public class OwpBootstrap : MonoBehaviour
         CreateKenneyPropHolder(_avatarSceneRoot.transform, "lampRoundFloor", new Vector3(-2.6f, 0f, 1.8f), new Vector3(0f, 30f, 0f), Vector3.one * 0.95f);
         CreateKenneyPropHolder(_avatarSceneRoot.transform, "lampRoundFloor", new Vector3(2.6f, 0f, 1.8f), new Vector3(0f, -30f, 0f), Vector3.one * 0.95f);
 
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "gate_complex", new Vector3(0f, 0f, 6.2f), new Vector3(0f, 180f, 0f), Vector3.one * 1.25f);
+
         CreateKenneyPropHolder(_avatarSceneRoot.transform, "rock_crystalsLargeA", new Vector3(-3.4f, 0f, 5.2f), new Vector3(0f, 10f, 0f), Vector3.one * 1.1f);
         CreateKenneyPropHolder(_avatarSceneRoot.transform, "rock_crystalsLargeB", new Vector3(3.2f, 0f, 5.6f), new Vector3(0f, -20f, 0f), Vector3.one * 1.15f);
 
@@ -2141,6 +2147,10 @@ public class OwpBootstrap : MonoBehaviour
 
         CreateKenneyPropHolder(_avatarSceneRoot.transform, "astronautA", new Vector3(-3.6f, 0f, 2.1f), new Vector3(0f, 90f, 0f), Vector3.one * 1.05f);
         CreateKenneyPropHolder(_avatarSceneRoot.transform, "alien", new Vector3(3.6f, 0f, 2.2f), new Vector3(0f, -90f, 0f), Vector3.one * 1.05f);
+
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "plantSmall2", new Vector3(-2.8f, 0f, 3.5f), new Vector3(0f, 25f, 0f), Vector3.one * 1.15f);
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "plantSmall3", new Vector3(2.9f, 0f, 3.3f), new Vector3(0f, -35f, 0f), Vector3.one * 1.1f);
+        CreateKenneyPropHolder(_avatarSceneRoot.transform, "pottedPlant", new Vector3(0.0f, 0f, 2.2f), new Vector3(0f, 0f, 0f), Vector3.one * 1.05f);
 
         CreateKenneyPropHolder(_avatarSceneRoot.transform, "van", new Vector3(-4.0f, 0f, 7.0f), new Vector3(0f, 25f, 0f), Vector3.one * 1.1f);
         CreateKenneyPropHolder(_avatarSceneRoot.transform, "ambulance", new Vector3(4.2f, 0f, 7.2f), new Vector3(0f, -25f, 0f), Vector3.one * 1.1f);
@@ -2244,6 +2254,36 @@ public class OwpBootstrap : MonoBehaviour
         }
 
         RepositionCamera(plan.ground.size);
+        _lastWorldPlan = plan;
+        EnterWorldView();
+    }
+
+    private void EnterAvatarView()
+    {
+        if (_worldRoot != null) _worldRoot.SetActive(false);
+        if (_avatarSceneRoot != null) _avatarSceneRoot.SetActive(true);
+        if (_avatarRoot != null) _avatarRoot.SetActive(true);
+
+        // Camera framing for avatar stage
+        var cam = Camera.main;
+        if (cam != null)
+        {
+            cam.fieldOfView = 40f;
+            cam.transform.position = new Vector3(0.9f, 1.55f, -4.2f);
+            cam.transform.LookAt(new Vector3(0f, 1.15f, 0f));
+        }
+    }
+
+    private void EnterWorldView()
+    {
+        if (_worldRoot == null)
+        {
+            AppendLog("World: nothing to view yet. Generate a world first.");
+            return;
+        }
+        if (_avatarSceneRoot != null) _avatarSceneRoot.SetActive(false);
+        if (_avatarRoot != null) _avatarRoot.SetActive(false);
+        _worldRoot.SetActive(true);
     }
 
     private void EnsureWorldRoot()
@@ -2796,6 +2836,13 @@ public class OwpBootstrap : MonoBehaviour
         var worldsScroll = CreateScrollView(_worldsPanel.transform, "WorldsScroll");
         AddLayoutElement(worldsScroll.scrollRect.gameObject, preferredWidth: -1, preferredHeight: -1, flexibleWidth: 1, flexibleHeight: 1);
         _worldsListRoot = worldsScroll.content;
+
+        // View toggle row (avatar stage vs world view)
+        var viewRow = CreateRow(_worldsPanel.transform, "WorldViewRow", 28);
+        _avatarViewButton = CreateSciFiButton(viewRow.transform, "AvatarView", "Avatar View", 120, 24);
+        _avatarViewButton.onClick.AddListener(() => EnterAvatarView());
+        _worldViewButton = CreateSciFiButton(viewRow.transform, "WorldView", "World View", 120, 24);
+        _worldViewButton.onClick.AddListener(() => EnterWorldView());
 
         // World prompt (LLM → plan → assembled scene)
         var worldPromptRow = CreateRow(_worldsPanel.transform, "WorldPromptRow", 32);
