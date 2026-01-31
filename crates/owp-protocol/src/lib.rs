@@ -76,6 +76,23 @@ pub struct AvatarMeshV1 {
     /// Optional content hash for caching.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
+    /// Optional list of mesh parts (for multi-material looks when the container format is STL).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<AvatarMeshPartV1>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvatarMeshPartV1 {
+    /// Short identifier used for caching/debugging (e.g. "body", "hat", "staff").
+    pub id: String,
+    /// URI to fetch this part from (typically a local admin endpoint).
+    pub uri: String,
+    /// Optional content hash for caching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    /// Optional material hint: "primary", "secondary", or "emissive".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1186,97 +1186,235 @@ public class OwpBootstrap : MonoBehaviour
         StartCoroutine(EnsureAvatarMesh(avatar));
     }
 
-    private IEnumerator EnsureAvatarMesh(AvatarSpec avatar)
-    {
-        if (avatar == null || avatar.mesh == null || string.IsNullOrEmpty(avatar.mesh.uri))
-        {
-            SetAvatarMeshActive(false);
-            yield break;
-        }
-        if (!string.Equals(avatar.mesh.format, "stl", StringComparison.OrdinalIgnoreCase))
-        {
-            SetAvatarMeshActive(false);
-            yield break;
-        }
+	    private IEnumerator EnsureAvatarMesh(AvatarSpec avatar)
+	    {
+	        if (avatar == null || avatar.mesh == null || string.IsNullOrEmpty(avatar.mesh.uri))
+	        {
+	            SetAvatarMeshActive(false);
+	            yield break;
+	        }
+	        if (!string.Equals(avatar.mesh.format, "stl", StringComparison.OrdinalIgnoreCase))
+	        {
+	            SetAvatarMeshActive(false);
+	            yield break;
+	        }
 
-        // Cache by sha256 when provided.
-        var sha = avatar.mesh.sha256;
-        if (!string.IsNullOrEmpty(sha) && string.Equals(_avatarMeshSha256, sha, StringComparison.OrdinalIgnoreCase) && _avatarMeshGo != null)
-        {
-            SetAvatarMeshActive(true);
-            yield break;
-        }
+	        // Cache by a composite key when provided.
+	        var meshKey = BuildMeshKey(avatar.mesh);
+	        if (!string.IsNullOrEmpty(meshKey) && string.Equals(_avatarMeshSha256, meshKey, StringComparison.OrdinalIgnoreCase) && _avatarMeshGo != null)
+	        {
+	            SetAvatarMeshActive(true);
+	            yield break;
+	        }
 
-        var url = AdminBaseUrl + avatar.mesh.uri;
-        AppendLog("Avatar: loading mesh…");
+	        EnsureAvatarMeshGo();
+	        ClearAvatarMeshChildren();
 
-        var task = HttpGetBytesAsync(url, 60);
-        yield return new WaitUntil(() => task.IsCompleted);
+	        var desiredHeight = Mathf.Clamp(avatar.height > 0.1f ? avatar.height : 1.8f, 0.5f, 2.0f);
+	        var primaryMat = CreateMeshMaterial(avatar, "primary");
+	        var secondaryMat = CreateMeshMaterial(avatar, "secondary");
+	        var emissiveMat = CreateMeshMaterial(avatar, "emissive");
 
-        if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok || task.Result.bytes == null || task.Result.bytes.Length == 0)
-        {
-            AppendLog($"Avatar: mesh load failed ({task.Result.status}).");
-            SetAvatarMeshActive(false);
-            yield break;
-        }
+	        // Multi-part STL (lets us apply multiple materials even though STL is colorless).
+	        if (avatar.mesh.parts != null && avatar.mesh.parts.Length > 0)
+	        {
+	            AppendLog("Avatar: loading mesh parts…");
 
-        if (!StlImporter.TryLoad(task.Result.bytes, swapYAndZ: true, out var mesh, out var err))
-        {
-            AppendLog($"Avatar: mesh parse failed ({err}).");
-            SetAvatarMeshActive(false);
-            yield break;
-        }
+	            // Prefer "body" part as the scaling reference.
+	            AvatarMeshPart bodyPart = null;
+	            foreach (var p in avatar.mesh.parts)
+	            {
+	                if (p == null) continue;
+	                if (p.id == "body") { bodyPart = p; break; }
+	            }
+	            if (bodyPart == null) bodyPart = avatar.mesh.parts[0];
 
-        EnsureAvatarMeshGo();
+	            if (bodyPart == null || string.IsNullOrEmpty(bodyPart.uri))
+	            {
+	                AppendLog("Avatar: mesh parts missing URIs.");
+	                SetAvatarMeshActive(false);
+	                yield break;
+	            }
 
-        // Scale + ground-align to desired height.
-        var desiredHeight = Mathf.Clamp(avatar.height > 0.1f ? avatar.height : 1.8f, 0.5f, 2.0f);
-        var b = mesh.bounds;
-        var h = Mathf.Max(0.0001f, b.size.y);
-        var scale = desiredHeight / h;
+	            // Load body first to compute bounds/scale.
+	            var bodyUrl = AdminBaseUrl + bodyPart.uri;
+	            var bodyTask = HttpGetBytesAsync(bodyUrl, 60);
+	            yield return new WaitUntil(() => bodyTask.IsCompleted);
+	            if (bodyTask.Status != TaskStatus.RanToCompletion || !bodyTask.Result.ok || bodyTask.Result.bytes == null || bodyTask.Result.bytes.Length == 0)
+	            {
+	                AppendLog($"Avatar: body mesh load failed ({bodyTask.Result.status}).");
+	                SetAvatarMeshActive(false);
+	                yield break;
+	            }
+	            if (!StlImporter.TryLoad(bodyTask.Result.bytes, swapYAndZ: true, out var bodyMesh, out var bodyErr))
+	            {
+	                AppendLog($"Avatar: body mesh parse failed ({bodyErr}).");
+	                SetAvatarMeshActive(false);
+	                yield break;
+	            }
 
-        // Offset so feet sit on y=0.
-        var minY = b.min.y;
-        var localOffset = new Vector3(0f, -minY, 0f);
+	            var b = bodyMesh.bounds;
+	            var h = Mathf.Max(0.0001f, b.size.y);
+	            var scale = desiredHeight / h;
+	            var minY = b.min.y;
+	            var localOffset = new Vector3(0f, -minY, 0f);
 
-        _avatarMeshFilter.sharedMesh = mesh;
-        _avatarMeshGo.transform.localScale = Vector3.one * scale;
-        _avatarMeshGo.transform.localPosition = localOffset * scale;
-        _avatarMeshGo.transform.localRotation = Quaternion.identity;
+	            CreateMeshPartGo("body", bodyMesh, PickMaterial(bodyPart.material, primaryMat, secondaryMat, emissiveMat), scale, localOffset);
 
-        // Apply a simple sci-fi material driven by avatar colors.
-        if (_avatarMeshRenderer != null)
-        {
-            var primary = ParseHexColor(avatar.primary_color, new Color(0f, 0.82f, 1f, 1f));
-            var emission = ParseHexColor(avatar.primary_color, Color.black) * 0.25f;
-            if (_avatarMeshRenderer.sharedMaterial == null)
-            {
-                _avatarMeshRenderer.sharedMaterial = new Material(Shader.Find("Standard"));
-            }
-            _avatarMeshRenderer.sharedMaterial.shader = Shader.Find("Standard");
-            _avatarMeshRenderer.sharedMaterial.color = primary;
-            _avatarMeshRenderer.sharedMaterial.SetFloat("_Metallic", 0.05f);
-            _avatarMeshRenderer.sharedMaterial.SetFloat("_Glossiness", 0.5f);
-            _avatarMeshRenderer.sharedMaterial.EnableKeyword("_EMISSION");
-            _avatarMeshRenderer.sharedMaterial.SetColor("_EmissionColor", emission);
-        }
+	            // Load remaining parts.
+	            foreach (var p in avatar.mesh.parts)
+	            {
+	                if (p == null) continue;
+	                if (p.id == "body") continue;
+	                if (string.IsNullOrEmpty(p.uri)) continue;
 
-        _avatarMeshSha256 = sha;
-        SetAvatarMeshActive(true);
-        AppendLog("Avatar: mesh applied.");
-    }
+	                var url = AdminBaseUrl + p.uri;
+	                var task = HttpGetBytesAsync(url, 60);
+	                yield return new WaitUntil(() => task.IsCompleted);
+	                if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok || task.Result.bytes == null || task.Result.bytes.Length == 0)
+	                {
+	                    continue;
+	                }
+	                if (!StlImporter.TryLoad(task.Result.bytes, swapYAndZ: true, out var mesh, out var err))
+	                {
+	                    continue;
+	                }
+	                CreateMeshPartGo(p.id, mesh, PickMaterial(p.material, primaryMat, secondaryMat, emissiveMat), scale, localOffset);
+	            }
 
-    private void EnsureAvatarMeshGo()
-    {
-        if (_avatarMeshGo != null) return;
-        if (_avatarRoot == null) return;
+	            _avatarMeshGo.transform.localScale = Vector3.one;
+	            _avatarMeshGo.transform.localPosition = Vector3.zero;
+	            _avatarMeshGo.transform.localRotation = Quaternion.identity;
 
-        _avatarMeshGo = new GameObject("AvatarMesh");
-        _avatarMeshGo.transform.SetParent(_avatarRoot.transform, false);
-        _avatarMeshFilter = _avatarMeshGo.AddComponent<MeshFilter>();
-        _avatarMeshRenderer = _avatarMeshGo.AddComponent<MeshRenderer>();
-        _avatarMeshGo.SetActive(false);
-    }
+	            _avatarMeshSha256 = meshKey;
+	            SetAvatarMeshActive(true);
+	            AppendLog("Avatar: mesh parts applied.");
+	            yield break;
+	        }
+
+	        // Single-mesh STL fallback.
+	        var urlSingle = AdminBaseUrl + avatar.mesh.uri;
+	        AppendLog("Avatar: loading mesh…");
+
+	        var taskSingle = HttpGetBytesAsync(urlSingle, 60);
+	        yield return new WaitUntil(() => taskSingle.IsCompleted);
+
+	        if (taskSingle.Status != TaskStatus.RanToCompletion || !taskSingle.Result.ok || taskSingle.Result.bytes == null || taskSingle.Result.bytes.Length == 0)
+	        {
+	            AppendLog($"Avatar: mesh load failed ({taskSingle.Result.status}).");
+	            SetAvatarMeshActive(false);
+	            yield break;
+	        }
+
+	        if (!StlImporter.TryLoad(taskSingle.Result.bytes, swapYAndZ: true, out var meshSingle, out var errSingle))
+	        {
+	            AppendLog($"Avatar: mesh parse failed ({errSingle}).");
+	            SetAvatarMeshActive(false);
+	            yield break;
+	        }
+
+	        var bb = meshSingle.bounds;
+	        var hh = Mathf.Max(0.0001f, bb.size.y);
+	        var scaleSingle = desiredHeight / hh;
+	        var minYSingle = bb.min.y;
+	        var localOffsetSingle = new Vector3(0f, -minYSingle, 0f);
+
+	        CreateMeshPartGo("mesh", meshSingle, primaryMat, scaleSingle, localOffsetSingle);
+
+	        _avatarMeshSha256 = meshKey;
+	        SetAvatarMeshActive(true);
+	        AppendLog("Avatar: mesh applied.");
+	    }
+
+	    private static string BuildMeshKey(AvatarMesh mesh)
+	    {
+	        if (mesh == null) return null;
+	        var sb = new StringBuilder();
+	        sb.Append(mesh.sha256 ?? "");
+	        if (mesh.parts != null)
+	        {
+	            foreach (var p in mesh.parts)
+	            {
+	                if (p == null) continue;
+	                sb.Append("|");
+	                sb.Append(p.id ?? "");
+	                sb.Append(":");
+	                sb.Append(p.sha256 ?? "");
+	            }
+	        }
+	        return sb.ToString();
+	    }
+
+	    private void EnsureAvatarMeshGo()
+	    {
+	        if (_avatarMeshGo != null) return;
+	        if (_avatarRoot == null) return;
+
+	        _avatarMeshGo = new GameObject("AvatarMesh");
+	        _avatarMeshGo.transform.SetParent(_avatarRoot.transform, false);
+	        _avatarMeshFilter = _avatarMeshGo.AddComponent<MeshFilter>();
+	        _avatarMeshRenderer = _avatarMeshGo.AddComponent<MeshRenderer>();
+	        _avatarMeshGo.SetActive(false);
+	    }
+
+	    private void ClearAvatarMeshChildren()
+	    {
+	        if (_avatarMeshGo == null) return;
+	        for (int i = _avatarMeshGo.transform.childCount - 1; i >= 0; i--)
+	        {
+	            Destroy(_avatarMeshGo.transform.GetChild(i).gameObject);
+	        }
+	        if (_avatarMeshFilter != null) _avatarMeshFilter.sharedMesh = null;
+	    }
+
+	    private void CreateMeshPartGo(string id, Mesh mesh, Material mat, float scale, Vector3 localOffset)
+	    {
+	        if (_avatarMeshGo == null) return;
+	        var go = new GameObject($"MeshPart_{id}");
+	        go.transform.SetParent(_avatarMeshGo.transform, false);
+	        var mf = go.AddComponent<MeshFilter>();
+	        mf.sharedMesh = mesh;
+	        var mr = go.AddComponent<MeshRenderer>();
+	        mr.sharedMaterial = mat;
+	        go.transform.localScale = Vector3.one * scale;
+	        go.transform.localPosition = localOffset * scale;
+	        go.transform.localRotation = Quaternion.identity;
+	    }
+
+	    private static Material PickMaterial(string hint, Material primary, Material secondary, Material emissive)
+	    {
+	        if (string.Equals(hint, "secondary", StringComparison.OrdinalIgnoreCase)) return secondary;
+	        if (string.Equals(hint, "emissive", StringComparison.OrdinalIgnoreCase)) return emissive;
+	        return primary;
+	    }
+
+	    private static Material CreateMeshMaterial(AvatarSpec avatar, string hint)
+	    {
+	        var primary = ParseHexColor(avatar != null ? avatar.primary_color : null, new Color(0f, 0.82f, 1f, 1f));
+	        var secondary = ParseHexColor(avatar != null ? avatar.secondary_color : null, Color.white);
+
+	        var baseColor = primary;
+	        if (string.Equals(hint, "secondary", StringComparison.OrdinalIgnoreCase)) baseColor = secondary;
+
+	        var m = new Material(Shader.Find("Standard"));
+	        m.shader = Shader.Find("Standard");
+	        m.color = baseColor;
+	        m.SetFloat("_Metallic", 0.05f);
+	        m.SetFloat("_Glossiness", 0.55f);
+
+	        var emissive = Color.black;
+	        if (string.Equals(hint, "emissive", StringComparison.OrdinalIgnoreCase))
+	        {
+	            emissive = primary * 1.25f;
+	        }
+	        else
+	        {
+	            emissive = primary * 0.12f;
+	        }
+	        m.EnableKeyword("_EMISSION");
+	        m.SetColor("_EmissionColor", emissive);
+	        return m;
+	    }
 
     private void SetAvatarMeshActive(bool active)
     {
@@ -2932,6 +3070,16 @@ public class OwpBootstrap : MonoBehaviour
 		        public string format;
 		        public string uri;
 		        public string sha256;
+		        public AvatarMeshPart[] parts;
+		    }
+
+		    [Serializable]
+		    private class AvatarMeshPart
+		    {
+		        public string id;
+		        public string uri;
+		        public string sha256;
+		        public string material;
 		    }
 
 	    [Serializable]

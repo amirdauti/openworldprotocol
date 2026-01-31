@@ -452,6 +452,8 @@ async fn generate_avatar_mesh(
 struct AvatarMeshQuery {
     #[serde(default)]
     profile_id: Option<String>,
+    #[serde(default)]
+    part: Option<String>,
 }
 
 async fn get_avatar_mesh(
@@ -461,10 +463,16 @@ async fn get_avatar_mesh(
 ) -> Result<axum::response::Response, StatusCode> {
     require_auth(&headers, &st.auth)?;
     let profile_id = q.profile_id.as_deref().unwrap_or("local");
-    if !avatar_mesh_mod::avatar_mesh_exists(&st.store, profile_id) {
+    let part = q.part.as_deref();
+    let exists = match part {
+        None => avatar_mesh_mod::avatar_mesh_exists(&st.store, profile_id),
+        Some("body") => avatar_mesh_mod::avatar_mesh_exists(&st.store, profile_id),
+        Some(p) => avatar_mesh_mod::avatar_mesh_part_exists(&st.store, profile_id, p),
+    };
+    if !exists {
         return Err(StatusCode::NOT_FOUND);
     }
-    let bytes = avatar_mesh_mod::read_mesh_bytes(&st.store, profile_id)
+    let bytes = avatar_mesh_mod::read_mesh_bytes(&st.store, profile_id, part)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok((

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use owp_protocol::{AvatarMeshV1, AvatarSpecV1};
+use owp_protocol::{AvatarMeshPartV1, AvatarMeshV1, AvatarSpecV1};
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -19,10 +19,25 @@ const AVATAR_SCAD_SCHEMA_JSON: &str = r#"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name","tags","scad"],
+  "required": ["name","primary_color","secondary_color","tags","parts","scad"],
   "properties": {
     "name": { "type": "string", "minLength": 1, "maxLength": 32 },
+    "primary_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+    "secondary_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
     "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 16 },
+    "parts": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id","material"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9_]{1,16}$" },
+          "material": { "type": ["string","null"], "enum": ["primary","secondary","emissive",null] }
+        }
+      }
+    },
     "scad": { "type": "string", "minLength": 1, "maxLength": 60000 }
   }
 }"#;
@@ -30,9 +45,20 @@ const AVATAR_SCAD_SCHEMA_JSON: &str = r#"{
 #[derive(Debug, Deserialize)]
 struct ScadResult {
     name: String,
+    primary_color: String,
+    secondary_color: String,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    parts: Vec<ScadPart>,
     scad: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScadPart {
+    id: String,
+    #[serde(default)]
+    material: Option<String>,
 }
 
 pub fn avatar_mesh_dir(store: &WorldStore, profile_id: &str) -> PathBuf {
@@ -47,12 +73,24 @@ pub fn avatar_mesh_stl_path(store: &WorldStore, profile_id: &str) -> PathBuf {
     avatar_mesh_dir(store, profile_id).join("avatar.stl")
 }
 
+pub fn avatar_mesh_parts_dir(store: &WorldStore, profile_id: &str) -> PathBuf {
+    avatar_mesh_dir(store, profile_id).join("parts")
+}
+
+pub fn avatar_mesh_part_stl_path(store: &WorldStore, profile_id: &str, part: &str) -> PathBuf {
+    avatar_mesh_parts_dir(store, profile_id).join(format!("{part}.stl"))
+}
+
 pub fn avatar_mesh_stderr_path(store: &WorldStore, profile_id: &str) -> PathBuf {
     avatar_mesh_dir(store, profile_id).join("openscad.stderr.txt")
 }
 
 pub fn avatar_mesh_exists(store: &WorldStore, profile_id: &str) -> bool {
     avatar_mesh_stl_path(store, profile_id).exists()
+}
+
+pub fn avatar_mesh_part_exists(store: &WorldStore, profile_id: &str, part: &str) -> bool {
+    avatar_mesh_part_stl_path(store, profile_id, part).exists()
 }
 
 async fn program_exists(program: &str) -> bool {
@@ -122,10 +160,21 @@ Safety constraints:\n\
 - Do NOT use import(), surface(), include, or use statements.\n\
 - Do NOT reference external files.\n\
 \n\
+Multi-material hint:\n\
+- STL has no colors, so we export multiple STL parts and apply materials in Unity.\n\
+- In `parts`, ALWAYS include: {{\"id\":\"body\",\"material\":\"primary\"}}.\n\
+- Add 1–3 accessory parts (e.g. \"hat\", \"staff\", \"orb\") and mark them as \"secondary\" or \"emissive\".\n\
+\n\
 Output requirements:\n\
 - `scad` must be valid OpenSCAD.\n\
-- `scad` should define `module avatar()` and call it at the end.\n\
-- Put the entire model in a single `union()` inside `avatar()`.\n\
+- `scad` must define `module avatar()` containing a single top-level `union()`.\n\
+- `scad` must define `module part_body()`.\n\
+- For each entry in `parts`, define a module named `part_<id>()`.\n\
+- Add this at the end so the server can export individual parts:\n\
+  - `render_part = \"all\";`\n\
+  - if `render_part == \"all\"` call `avatar()`\n\
+  - else if `render_part == \"body\"` call `part_body()`\n\
+  - else if `render_part == \"<id>\"` call `part_<id>()` for each part\n\
 \n\
 User request: {user_prompt}\n"
     );
@@ -170,6 +219,8 @@ User request: {user_prompt}\n"
 
     let dir = avatar_mesh_dir(store, profile_id);
     std::fs::create_dir_all(&dir).with_context(|| format!("create {dir:?}"))?;
+    std::fs::create_dir_all(avatar_mesh_parts_dir(store, profile_id))
+        .with_context(|| "create parts dir")?;
 
     let scad_path = avatar_mesh_scad_path(store, profile_id);
     std::fs::write(&scad_path, &scad.scad).with_context(|| format!("write {scad_path:?}"))?;
@@ -180,6 +231,7 @@ User request: {user_prompt}\n"
     let mut cmd = Command::new("openscad");
     cmd.arg("--render");
     cmd.arg("-o").arg(&stl_path);
+    cmd.arg("-D").arg("render_part=\"all\"");
     cmd.arg(&scad_path);
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::null());
@@ -200,6 +252,59 @@ User request: {user_prompt}\n"
     let stl_bytes = std::fs::read(&stl_path).with_context(|| format!("read {stl_path:?}"))?;
     let hash = hex::encode(Sha256::digest(&stl_bytes));
 
+    // Render optional accessory parts to separate STL files (for multi-material looks in Unity).
+    let mut mesh_parts: Vec<AvatarMeshPartV1> = Vec::new();
+    for p in scad.parts.iter() {
+        let part_id = p.id.as_str();
+        if part_id == "all" {
+            continue;
+        }
+        if part_id == "body" {
+            // Reserved selector for part_body(). Uses the combined mesh bytes/hash.
+            mesh_parts.push(AvatarMeshPartV1 {
+                id: "body".to_string(),
+                uri: format!("/avatar/mesh?profile_id={profile_id}&part=body"),
+                sha256: Some(hash.clone()),
+                material: Some("primary".to_string()),
+            });
+            continue;
+        }
+
+        let out_path = avatar_mesh_part_stl_path(store, profile_id, part_id);
+
+        let mut pcmd = Command::new("openscad");
+        pcmd.arg("--render");
+        pcmd.arg("-o").arg(&out_path);
+        pcmd.arg("-D").arg(format!("render_part=\"{part_id}\""));
+        pcmd.arg(&scad_path);
+        pcmd.stdin(std::process::Stdio::null());
+        pcmd.stdout(std::process::Stdio::null());
+        pcmd.stderr(std::process::Stdio::piped());
+
+        let pout = timeout(Duration::from_secs(60), pcmd.output())
+            .await
+            .context("openscad timeout (part)")?
+            .context("run openscad (part)")?;
+
+        if !pout.status.success() {
+            continue;
+        }
+
+        if let Ok(bytes) = std::fs::read(&out_path) {
+            let phash = hex::encode(Sha256::digest(&bytes));
+            if phash == hash {
+                // Likely ignored render_part and exported the full mesh; don't duplicate.
+                continue;
+            }
+            mesh_parts.push(AvatarMeshPartV1 {
+                id: part_id.to_string(),
+                uri: format!("/avatar/mesh?profile_id={profile_id}&part={part_id}"),
+                sha256: Some(phash),
+                material: p.material.clone(),
+            });
+        }
+    }
+
     // Update avatar with tags + mesh pointer.
     let mut avatar = avatar_mod::load_avatar(store, profile_id)
         .context("load avatar")?
@@ -216,6 +321,8 @@ User request: {user_prompt}\n"
 
     avatar.name = scad.name;
     avatar.height = 1.8;
+    avatar.primary_color = scad.primary_color;
+    avatar.secondary_color = scad.secondary_color;
     // Replace tags with the model-provided tags (avoid unbounded tag spam from prior pipelines).
     avatar.tags.clear();
     avatar.tags.push("mesh".to_string());
@@ -235,14 +342,23 @@ User request: {user_prompt}\n"
         format: "stl".to_string(),
         uri: format!("/avatar/mesh?profile_id={profile_id}"),
         sha256: Some(hash),
+        parts: mesh_parts,
     });
 
     avatar_mod::save_avatar(store, profile_id, &avatar).context("save avatar")?;
     Ok(avatar)
 }
 
-pub fn read_mesh_bytes(store: &WorldStore, profile_id: &str) -> Result<Vec<u8>> {
-    let p = avatar_mesh_stl_path(store, profile_id);
+pub fn read_mesh_bytes(
+    store: &WorldStore,
+    profile_id: &str,
+    part: Option<&str>,
+) -> Result<Vec<u8>> {
+    let p = match part {
+        None => avatar_mesh_stl_path(store, profile_id),
+        Some("body") => avatar_mesh_stl_path(store, profile_id),
+        Some(id) => avatar_mesh_part_stl_path(store, profile_id, id),
+    };
     let bytes = std::fs::read(&p).with_context(|| format!("read {p:?}"))?;
     Ok(bytes)
 }

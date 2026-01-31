@@ -45,6 +45,7 @@ Notes:
   - Companion prompt → provider generates OpenSCAD code (JSON schema output)
   - server runs `openscad` headlessly to render `avatar.stl`
   - Unity downloads the STL and displays it at runtime
+  - Because STL is colorless, the server may also export multiple STL **parts** (hat/staff/etc.) so Unity can apply different materials
 
 Requirements (for mesh avatars):
 - `openscad` must be installed and available on `PATH` on the host machine.
