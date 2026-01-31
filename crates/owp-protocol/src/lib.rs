@@ -58,6 +58,34 @@ pub struct AvatarSpecV1 {
     /// Freeform tags like "athletic", "cyberpunk", etc.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Optional structured parts for procedural/kitbashed rendering.
+    /// If empty, clients may fall back to interpreting `tags`.
+    #[serde(default)]
+    pub parts: Vec<AvatarPartV1>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvatarPartV1 {
+    /// Freeform identifier, e.g. "horn_left", "glow_stripe_1"
+    pub id: String,
+    /// Attachment point, e.g. "body" or "head"
+    pub attach: String,
+    /// Primitive type: "sphere" | "capsule" | "cube" | "cylinder"
+    pub primitive: String,
+    /// Local position relative to `attach`
+    pub position: [f32; 3],
+    /// Local rotation in degrees (Euler XYZ) relative to `attach`
+    pub rotation: [f32; 3],
+    /// Local scale
+    pub scale: [f32; 3],
+    /// Base color hex like "#RRGGBB"
+    pub color: String,
+    /// Optional emission color hex like "#RRGGBB"
+    #[serde(default)]
+    pub emission_color: Option<String>,
+    /// Optional emission intensity (0 disables). Typical range 0-5.
+    #[serde(default)]
+    pub emission_strength: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

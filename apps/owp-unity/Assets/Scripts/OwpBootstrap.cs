@@ -45,6 +45,9 @@ public class OwpBootstrap : MonoBehaviour
 
     private Process _serverProcess;
     private GameObject _avatarRoot;
+    private Transform _avatarBody;
+    private Transform _avatarHead;
+    private Transform _avatarPartsRoot;
     private Renderer _avatarRenderer;
     private Renderer _hairRenderer;
 
@@ -882,7 +885,15 @@ public class OwpBootstrap : MonoBehaviour
         if (_avatarRoot == null) return;
 
         _avatarRoot.name = $"Avatar_{avatar.name}";
-        _avatarRoot.transform.localScale = new Vector3(1f, Mathf.Clamp(avatar.height, 0.5f, 2f), 1f);
+        var height = Mathf.Clamp(avatar.height, 0.5f, 2f);
+        if (_avatarBody != null)
+        {
+            _avatarBody.localScale = new Vector3(1f, height, 1f);
+        }
+        if (_avatarHead != null)
+        {
+            _avatarHead.localPosition = new Vector3(0, 1.55f * height, 0);
+        }
 
         if (_avatarRenderer != null)
         {
@@ -892,7 +903,139 @@ public class OwpBootstrap : MonoBehaviour
         {
             _hairRenderer.material.color = ParseHex(avatar.secondary_color, Color.white);
         }
+
+        ApplyAvatarParts(avatar);
     }
+
+    private void ApplyAvatarParts(AvatarSpec avatar)
+    {
+        if (_avatarPartsRoot == null) return;
+
+        for (int i = _avatarPartsRoot.childCount - 1; i >= 0; i--)
+        {
+            Destroy(_avatarPartsRoot.GetChild(i).gameObject);
+        }
+
+        if (avatar.parts == null || avatar.parts.Length == 0)
+        {
+            // Fallback: generate a couple of parts from tags to keep "prompt anything" somewhat visible.
+            if (avatar.tags == null) return;
+            foreach (var t in avatar.tags)
+            {
+                if (string.IsNullOrEmpty(t)) continue;
+                var tag = t.ToLowerInvariant();
+                if (tag.Contains("horn"))
+                {
+                    SpawnPart(new AvatarPart
+                    {
+                        id = "horn_left",
+                        attach = "head",
+                        primitive = "capsule",
+                        position = new float[] { -0.18f, 0.18f, 0f },
+                        rotation = new float[] { 25f, 0f, 20f },
+                        scale = new float[] { 0.12f, 0.35f, 0.12f },
+                        color = avatar.secondary_color,
+                        emission_color = null,
+                        emission_strength = 0f
+                    }, avatar);
+                    SpawnPart(new AvatarPart
+                    {
+                        id = "horn_right",
+                        attach = "head",
+                        primitive = "capsule",
+                        position = new float[] { 0.18f, 0.18f, 0f },
+                        rotation = new float[] { 25f, 0f, -20f },
+                        scale = new float[] { 0.12f, 0.35f, 0.12f },
+                        color = avatar.secondary_color,
+                        emission_color = null,
+                        emission_strength = 0f
+                    }, avatar);
+                }
+                if (tag.Contains("glow") || tag.Contains("biolum"))
+                {
+                    // simple glow stripes
+                    for (int i = 0; i < 5; i++)
+                    {
+                        SpawnPart(new AvatarPart
+                        {
+                            id = $"stripe_{i}",
+                            attach = "body",
+                            primitive = "cube",
+                            position = new float[] { -0.15f + i * 0.075f, 0.85f, 0.24f },
+                            rotation = new float[] { 0f, 0f, 0f },
+                            scale = new float[] { 0.02f, 0.4f, 0.02f },
+                            color = avatar.primary_color,
+                            emission_color = avatar.primary_color,
+                            emission_strength = 2.5f
+                        }, avatar);
+                    }
+                }
+            }
+            return;
+        }
+
+        foreach (var p in avatar.parts)
+        {
+            if (p == null) continue;
+            SpawnPart(p, avatar);
+        }
+    }
+
+    private void SpawnPart(AvatarPart p, AvatarSpec avatar)
+    {
+        var prim = ParsePrimitive(p.primitive);
+        var go = GameObject.CreatePrimitive(prim);
+        go.name = $"Part_{p.id}";
+        go.transform.SetParent(_avatarPartsRoot, false);
+
+        var attach = (p.attach ?? "body").ToLowerInvariant();
+        if (attach == "head" && _avatarHead != null)
+        {
+            go.transform.SetParent(_avatarHead, false);
+        }
+        else if (_avatarBody != null)
+        {
+            go.transform.SetParent(_avatarBody, false);
+        }
+
+        go.transform.localPosition = ToVector3(p.position);
+        go.transform.localRotation = Quaternion.Euler(ToVector3(p.rotation));
+        go.transform.localScale = ToVector3(p.scale, Vector3.one * 0.1f);
+
+        var r = go.GetComponent<Renderer>();
+        if (r != null)
+        {
+            r.material = new Material(Shader.Find("Standard"));
+            r.material.color = ParseHex(p.color, Color.white);
+
+            if (!string.IsNullOrEmpty(p.emission_color) && p.emission_strength > 0f)
+            {
+                var ec = ParseHex(p.emission_color, r.material.color);
+                r.material.EnableKeyword("_EMISSION");
+                r.material.SetColor("_EmissionColor", ec * p.emission_strength);
+            }
+        }
+    }
+
+    private static PrimitiveType ParsePrimitive(string primitive)
+    {
+        switch ((primitive ?? "").ToLowerInvariant())
+        {
+            case "sphere": return PrimitiveType.Sphere;
+            case "capsule": return PrimitiveType.Capsule;
+            case "cylinder": return PrimitiveType.Cylinder;
+            case "cube":
+            default: return PrimitiveType.Cube;
+        }
+    }
+
+    private static Vector3 ToVector3(float[] v, Vector3 fallback = default(Vector3))
+    {
+        if (v == null || v.Length < 3) return fallback;
+        return new Vector3(v[0], v[1], v[2]);
+    }
+
+    private static Vector3 ToVector3(float[] v) => ToVector3(v, Vector3.zero);
 
     private static Color ParseHex(string hex, Color fallback)
     {
@@ -910,21 +1053,33 @@ public class OwpBootstrap : MonoBehaviour
 
     private void CreatePlaceholderAvatar()
     {
-        _avatarRoot = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-        _avatarRoot.transform.position = new Vector3(0, 1, 0);
+        _avatarRoot = new GameObject("AvatarRoot");
+        _avatarRoot.transform.position = new Vector3(0, 0, 0);
 
-        _avatarRenderer = _avatarRoot.GetComponent<Renderer>();
+        var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        body.name = "Body";
+        body.transform.SetParent(_avatarRoot.transform, false);
+        body.transform.localPosition = new Vector3(0, 1, 0);
+        _avatarBody = body.transform;
+
+        _avatarRenderer = body.GetComponent<Renderer>();
         _avatarRenderer.material = new Material(Shader.Find("Standard"));
         _avatarRenderer.material.color = Color.cyan;
 
-        var hair = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        hair.transform.SetParent(_avatarRoot.transform, false);
-        hair.transform.localPosition = new Vector3(0, 1.05f, 0);
-        hair.transform.localScale = new Vector3(0.55f, 0.35f, 0.55f);
+        var head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        head.name = "Head";
+        head.transform.SetParent(_avatarRoot.transform, false);
+        head.transform.localPosition = new Vector3(0, 1.55f, 0);
+        head.transform.localScale = new Vector3(0.45f, 0.45f, 0.45f);
+        _avatarHead = head.transform;
 
-        _hairRenderer = hair.GetComponent<Renderer>();
+        _hairRenderer = head.GetComponent<Renderer>();
         _hairRenderer.material = new Material(Shader.Find("Standard"));
         _hairRenderer.material.color = Color.white;
+
+        var parts = new GameObject("Parts");
+        parts.transform.SetParent(_avatarRoot.transform, false);
+        _avatarPartsRoot = parts.transform;
     }
 
     private void EnsureSceneBasics()
@@ -1676,14 +1831,29 @@ public class OwpBootstrap : MonoBehaviour
         public string text;
     }
 
-    [Serializable]
-    private class AvatarSpec
-    {
-        public string version;
-        public string name;
-        public string primary_color;
-        public string secondary_color;
-        public float height;
-        public string[] tags;
-    }
+	    [Serializable]
+	    private class AvatarSpec
+	    {
+	        public string version;
+	        public string name;
+	        public string primary_color;
+	        public string secondary_color;
+	        public float height;
+	        public string[] tags;
+	        public AvatarPart[] parts;
+	    }
+
+	    [Serializable]
+	    private class AvatarPart
+	    {
+	        public string id;
+	        public string attach;
+	        public string primitive;
+	        public float[] position;
+	        public float[] rotation;
+	        public float[] scale;
+	        public string color;
+	        public string emission_color;
+	        public float emission_strength;
+	    }
 }

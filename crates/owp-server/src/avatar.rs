@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use owp_protocol::AvatarSpecV1;
+use owp_protocol::{AvatarPartV1, AvatarSpecV1};
 use serde_json::Value;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
@@ -11,14 +11,34 @@ pub const AVATAR_SCHEMA_JSON: &str = r#"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version","name","primary_color","secondary_color","height","tags"],
+  "required": ["version","name","primary_color","secondary_color","height","tags","parts"],
   "properties": {
     "version": { "type": "string" },
     "name": { "type": "string", "minLength": 1, "maxLength": 32 },
     "primary_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
     "secondary_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
     "height": { "type": "number", "minimum": 0.5, "maximum": 2.0 },
-    "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 16 }
+    "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 16 },
+    "parts": {
+      "type": "array",
+      "maxItems": 48,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id","attach","primitive","position","rotation","scale","color"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "attach": { "type": "string", "enum": ["body","head"] },
+          "primitive": { "type": "string", "enum": ["sphere","capsule","cube","cylinder"] },
+          "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+          "rotation": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+          "scale": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+          "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+          "emission_color": { "type": ["string","null"], "pattern": "^#[0-9A-Fa-f]{6}$" },
+          "emission_strength": { "type": ["number","null"], "minimum": 0.0, "maximum": 10.0 }
+        }
+      }
+    }
   }
 }"#;
 
@@ -59,12 +79,18 @@ pub async fn generate_avatar(
         "You are the OWP avatar generator.\n\
 Return ONLY a JSON object matching the provided schema.\n\
 Do not include markdown, backticks, or explanations.\n\
+\n\
+IMPORTANT: The Unity client can only render a simple humanoid plus a list of procedural primitives.\n\
+Only claim features that you actually encode in `parts`.\n\
+\n\
 User request: {user_prompt}\n\
 \n\
 Constraints:\n\
 - version must be \"v1\"\n\
 - colors must be hex like \"#RRGGBB\"\n\
-- height must be between 0.5 and 2.0\n"
+- height must be between 0.5 and 2.0\n\
+- parts.attach must be \"body\" or \"head\"\n\
+- parts.primitive must be one of sphere/capsule/cube/cylinder\n"
     );
 
     let avatar_json = match provider {
@@ -153,6 +179,12 @@ fn value_to_avatar(v: &Value) -> Result<AvatarSpecV1> {
         })
         .unwrap_or_else(|| "#FFFFFF".to_string());
 
+    let parts = obj
+        .get("parts")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(value_to_part).collect::<Vec<_>>())
+        .unwrap_or_default();
+
     Ok(AvatarSpecV1 {
         version: obj
             .get("version")
@@ -164,6 +196,45 @@ fn value_to_avatar(v: &Value) -> Result<AvatarSpecV1> {
         secondary_color,
         height,
         tags,
+        parts,
+    })
+}
+
+fn value_to_part(v: &Value) -> Option<AvatarPartV1> {
+    let obj = v.as_object()?;
+    let id = obj.get("id")?.as_str()?.to_string();
+    let attach = obj.get("attach")?.as_str()?.to_string();
+    let primitive = obj.get("primitive")?.as_str()?.to_string();
+    let position = obj.get("position")?.as_array()?;
+    let rotation = obj.get("rotation")?.as_array()?;
+    let scale = obj.get("scale")?.as_array()?;
+    let color = obj.get("color")?.as_str()?.to_string();
+
+    Some(AvatarPartV1 {
+        id,
+        attach,
+        primitive,
+        position: [
+            position.get(0)?.as_f64()? as f32,
+            position.get(1)?.as_f64()? as f32,
+            position.get(2)?.as_f64()? as f32,
+        ],
+        rotation: [
+            rotation.get(0)?.as_f64()? as f32,
+            rotation.get(1)?.as_f64()? as f32,
+            rotation.get(2)?.as_f64()? as f32,
+        ],
+        scale: [
+            scale.get(0)?.as_f64()? as f32,
+            scale.get(1)?.as_f64()? as f32,
+            scale.get(2)?.as_f64()? as f32,
+        ],
+        color,
+        emission_color: obj
+            .get("emission_color")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        emission_strength: obj.get("emission_strength").and_then(|v| v.as_f64()).map(|f| f as f32),
     })
 }
 
@@ -220,5 +291,47 @@ pub(crate) fn normalize_avatar(a: &mut AvatarSpecV1) {
     }
     if a.name.trim().is_empty() {
         a.name = "Traveler".to_string();
+    }
+
+    if a.parts.len() > 48 {
+        a.parts.truncate(48);
+    }
+    for p in &mut a.parts {
+        if p.id.trim().is_empty() {
+            p.id = "part".to_string();
+        }
+        if p.attach != "head" {
+            p.attach = "body".to_string();
+        }
+        match p.primitive.as_str() {
+            "sphere" | "capsule" | "cube" | "cylinder" => {}
+            _ => p.primitive = "cube".to_string(),
+        }
+        for v in [&mut p.position, &mut p.rotation, &mut p.scale] {
+            for x in v.iter_mut() {
+                if !x.is_finite() {
+                    *x = 0.0;
+                }
+            }
+        }
+        // Avoid degenerate scales
+        for s in p.scale.iter_mut() {
+            if *s == 0.0 {
+                *s = 0.1;
+            }
+            *s = s.clamp(0.01, 10.0);
+        }
+        if let Some(strength) = p.emission_strength {
+            if !strength.is_finite() || strength <= 0.0 {
+                p.emission_strength = None;
+            } else {
+                p.emission_strength = Some(strength.clamp(0.0, 10.0));
+            }
+        }
+        if let Some(ref c) = p.emission_color {
+            if c.trim().is_empty() {
+                p.emission_color = None;
+            }
+        }
     }
 }

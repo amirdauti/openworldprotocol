@@ -314,14 +314,34 @@ fn companion_schema_json() -> String {
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["version","name","primary_color","secondary_color","height","tags"],
+          "required": ["version","name","primary_color","secondary_color","height","tags","parts"],
           "properties": {
             "version": { "type": "string" },
             "name": { "type": "string", "minLength": 1, "maxLength": 32 },
             "primary_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
             "secondary_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
             "height": { "type": "number", "minimum": 0.5, "maximum": 2.0 },
-            "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 16 }
+            "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 16 },
+            "parts": {
+              "type": "array",
+              "maxItems": 48,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id","attach","primitive","position","rotation","scale","color"],
+                "properties": {
+                  "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+                  "attach": { "type": "string", "enum": ["body","head"] },
+                  "primitive": { "type": "string", "enum": ["sphere","capsule","cube","cylinder"] },
+                  "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+                  "rotation": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+                  "scale": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+                  "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+                  "emission_color": { "type": ["string","null"], "pattern": "^#[0-9A-Fa-f]{6}$" },
+                  "emission_strength": { "type": ["number","null"], "minimum": 0.0, "maximum": 10.0 }
+                }
+              }
+            }
           }
         }
       ]
@@ -356,6 +376,7 @@ pub async fn companion_chat(
             secondary_color: "#FFFFFF".to_string(),
             height: 1.0,
             tags: vec!["default".to_string()],
+            parts: Vec::new(),
         });
     let current_avatar_json =
         serde_json::to_string_pretty(&current_avatar).context("serialize current avatar")?;
@@ -370,6 +391,8 @@ pub async fn companion_chat(
     prompt.push_str("- If the user requests an avatar change, set `avatar` to the FULL updated avatar object.\n");
     prompt.push_str("- If no avatar change is needed, set `avatar` to null.\n");
     prompt.push_str("- Keep colors as hex like \"#RRGGBB\" and height within 0.5..2.0.\n");
+    prompt.push_str("- The Unity client only renders the base humanoid plus `avatar.parts` primitives. Only claim details you actually encode in `avatar.parts`.\n");
+    prompt.push_str("- If the user asks for something you can't literally model, approximate it with primitives (horns/stripes/gear) and explain briefly.\n");
     prompt.push_str("\nCurrent avatar JSON:\n");
     prompt.push_str(&current_avatar_json);
     prompt.push_str("\n\nConversation:\n");
