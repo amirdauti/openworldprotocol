@@ -216,7 +216,9 @@ User request: {user_prompt}\n"
 
     avatar.name = scad.name;
     avatar.height = 1.8;
-    // Merge tags (keep existing too).
+    // Replace tags with the model-provided tags (avoid unbounded tag spam from prior pipelines).
+    avatar.tags.clear();
+    avatar.tags.push("mesh".to_string());
     for t in scad.tags {
         if avatar.tags.iter().any(|x| x.eq_ignore_ascii_case(&t)) {
             continue;
@@ -226,6 +228,8 @@ User request: {user_prompt}\n"
         }
         avatar.tags.push(t);
     }
+    // Mesh supersedes primitive parts.
+    avatar.parts.clear();
 
     avatar.mesh = Some(AvatarMeshV1 {
         format: "stl".to_string(),

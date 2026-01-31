@@ -406,12 +406,10 @@ pub async fn companion_chat(
                 // Fall back to the primitives/tag pipeline if mesh generation isn't available.
                 let mut out = companion_chat_primitives(store, cfg, profile_id, message).await?;
                 let msg = e.to_string();
-                if msg.contains("openscad not found") {
-                    out.reply = format!(
-                        "{}\n\nTip: install OpenSCAD to enable high-quality 3D avatar meshes.",
-                        out.reply
-                    );
-                }
+                out.reply = format!(
+                    "{}\n\n(Avatar mesh generation failed; fell back to the basic avatar builder.)\nError: {msg}\n\nIf OpenSCAD ran, check:\n- ~/.owp/profiles/{profile_id}/avatar_mesh/avatar.scad\n- ~/.owp/profiles/{profile_id}/avatar_mesh/openscad.stderr.txt",
+                    out.reply
+                );
                 return Ok(out);
             }
         }
