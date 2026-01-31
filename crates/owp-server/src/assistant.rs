@@ -43,8 +43,12 @@ pub struct AssistantConfig {
     #[serde(default)]
     pub claude_model: Option<String>,
     /// When enabled, generate an OpenSCAD→STL avatar mesh on each chat update (host-only).
-    #[serde(default)]
+    #[serde(default = "default_avatar_mesh_enabled")]
     pub avatar_mesh_enabled: bool,
+}
+
+fn default_avatar_mesh_enabled() -> bool {
+    true
 }
 
 impl Default for AssistantConfig {
