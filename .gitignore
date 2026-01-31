@@ -22,6 +22,9 @@ apps/owp-unity/[Bb]uild/
 apps/owp-unity/[Bb]uilds/
 apps/owp-unity/[Ll]ogs/
 apps/owp-unity/[Uu]ser[Ss]ettings/
+apps/owp-unity/.vscode/
+apps/owp-unity/*.csproj
+apps/owp-unity/*.sln
 
 # Private launchpad (gitignored by design)
 apps/owp-launchpad-private/

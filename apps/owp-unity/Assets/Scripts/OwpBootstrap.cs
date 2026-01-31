@@ -2,16 +2,18 @@ using System;
 using System.Collections;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
-using UnityEngine.Networking;
 using UnityEngine.UI;
 
 public class OwpBootstrap : MonoBehaviour
 {
     private const string AdminBaseUrl = "http://127.0.0.1:9333";
+    private static readonly HttpClient Http = new HttpClient();
 
     private Process _serverProcess;
     private GameObject _avatarRoot;
@@ -101,12 +103,9 @@ public class OwpBootstrap : MonoBehaviour
 
     private IEnumerator CheckHealth(Action<bool> cb)
     {
-        using (var req = UnityWebRequest.Get($"{AdminBaseUrl}/health"))
-        {
-            req.timeout = 2;
-            yield return req.SendWebRequest();
-            cb(req.result == UnityWebRequest.Result.Success);
-        }
+        var task = HttpRequestAsync("GET", $"{AdminBaseUrl}/health", null, 2);
+        yield return new WaitUntil(() => task.IsCompleted);
+        cb(task.Status == TaskStatus.RanToCompletion && task.Result.ok);
     }
 
     private void StartServerProcess()
@@ -176,37 +175,34 @@ public class OwpBootstrap : MonoBehaviour
 
     private IEnumerator RefreshAssistantStatus(bool forceShowProviderPanel = false)
     {
-        using (var req = UnityWebRequest.Get($"{AdminBaseUrl}/assistant/status"))
+        var task = HttpRequestAsync("GET", $"{AdminBaseUrl}/assistant/status", null, 5);
+        yield return new WaitUntil(() => task.IsCompleted);
+        if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok)
         {
-            req.timeout = 5;
-            yield return req.SendWebRequest();
-            if (req.result != UnityWebRequest.Result.Success)
-            {
-                AppendLog("Assistant: cannot read status (server not ready).");
-                yield break;
-            }
+            AppendLog("Assistant: cannot read status (server not ready).");
+            yield break;
+        }
 
-            var status = JsonUtility.FromJson<AssistantStatus>(req.downloadHandler.text);
-            if (status == null)
-            {
-                AppendLog("Assistant: status parse failed.");
-                yield break;
-            }
+        var status = JsonUtility.FromJson<AssistantStatus>(task.Result.text);
+        if (status == null)
+        {
+            AppendLog("Assistant: status parse failed.");
+            yield break;
+        }
 
-            var provider = status.provider ?? "";
-            SetProviderButtonLabel(provider);
+        var provider = status.provider ?? "";
+        SetProviderButtonLabel(provider);
 
-            if (string.IsNullOrEmpty(provider) || forceShowProviderPanel)
-            {
-                _providerPanel.SetActive(true);
-                UpdateProviderButtons(status);
-                AppendLog("Assistant: choose Codex or Claude.");
-            }
-            else
-            {
-                _providerPanel.SetActive(false);
-                AppendLog($"Assistant: provider set to {provider}.");
-            }
+        if (string.IsNullOrEmpty(provider) || forceShowProviderPanel)
+        {
+            _providerPanel.SetActive(true);
+            UpdateProviderButtons(status);
+            AppendLog("Assistant: choose Codex or Claude.");
+        }
+        else
+        {
+            _providerPanel.SetActive(false);
+            AppendLog($"Assistant: provider set to {provider}.");
         }
     }
 
@@ -230,25 +226,19 @@ public class OwpBootstrap : MonoBehaviour
 
     private IEnumerator SetProvider(string provider)
     {
-        var body = Encoding.UTF8.GetBytes($"{{\"provider\":\"{provider}\"}}");
-        using (var req = new UnityWebRequest($"{AdminBaseUrl}/assistant/provider", "POST"))
+        var jsonBody = $"{{\"provider\":\"{provider}\"}}";
+        var task = HttpRequestAsync("POST", $"{AdminBaseUrl}/assistant/provider", jsonBody, 10);
+        yield return new WaitUntil(() => task.IsCompleted);
+
+        if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok)
         {
-            req.uploadHandler = new UploadHandlerRaw(body);
-            req.downloadHandler = new DownloadHandlerBuffer();
-            req.SetRequestHeader("Content-Type", "application/json");
-            req.timeout = 10;
-            yield return req.SendWebRequest();
-
-            if (req.result != UnityWebRequest.Result.Success)
-            {
-                AppendLog($"Assistant: failed to set provider ({provider}).");
-                yield break;
-            }
-
-            AppendLog($"Assistant: provider selected: {provider}.");
-            _providerPanel.SetActive(false);
-            yield return StartCoroutine(RefreshAssistantStatus());
+            AppendLog($"Assistant: failed to set provider ({provider}).");
+            yield break;
         }
+
+        AppendLog($"Assistant: provider selected: {provider}.");
+        _providerPanel.SetActive(false);
+        yield return StartCoroutine(RefreshAssistantStatus());
     }
 
     private void SetProviderButtonLabel(string provider)
@@ -267,64 +257,54 @@ public class OwpBootstrap : MonoBehaviour
     private IEnumerator GenerateAvatar(string prompt)
     {
         var json = $"{{\"prompt\":{JsonEscape(prompt)}}}";
-        var body = Encoding.UTF8.GetBytes(json);
+        var task = HttpRequestAsync("POST", $"{AdminBaseUrl}/avatar/generate", json, 120);
+        yield return new WaitUntil(() => task.IsCompleted);
 
-        using (var req = new UnityWebRequest($"{AdminBaseUrl}/avatar/generate", "POST"))
+        if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok)
         {
-            req.uploadHandler = new UploadHandlerRaw(body);
-            req.downloadHandler = new DownloadHandlerBuffer();
-            req.SetRequestHeader("Content-Type", "application/json");
-            req.timeout = 120;
-            yield return req.SendWebRequest();
-
-            if (req.result != UnityWebRequest.Result.Success)
-            {
-                AppendLog("Assistant: avatar generation failed.");
-                yield break;
-            }
-
-            var resp = JsonUtility.FromJson<AvatarGenerateResponse>(req.downloadHandler.text);
-            if (resp == null || resp.avatar == null)
-            {
-                AppendLog("Assistant: invalid avatar response.");
-                yield break;
-            }
-
-            ApplyAvatar(resp.avatar);
-            AppendLog($"Assistant: avatar updated → {resp.avatar.name}");
+            AppendLog("Assistant: avatar generation failed.");
+            yield break;
         }
+
+        var resp = JsonUtility.FromJson<AvatarGenerateResponse>(task.Result.text);
+        if (resp == null || resp.avatar == null)
+        {
+            AppendLog("Assistant: invalid avatar response.");
+            yield break;
+        }
+
+        ApplyAvatar(resp.avatar);
+        AppendLog($"Assistant: avatar updated → {resp.avatar.name}");
     }
 
     private IEnumerator RefreshWorlds()
     {
         var path = _worldsUseOnChain ? "/discovery/worlds" : "/worlds";
-        using (var req = UnityWebRequest.Get($"{AdminBaseUrl}{path}"))
+        var task = HttpRequestAsync("GET", $"{AdminBaseUrl}{path}", null, 10);
+        yield return new WaitUntil(() => task.IsCompleted);
+
+        if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok)
         {
-            req.timeout = 10;
-            yield return req.SendWebRequest();
-            if (req.result != UnityWebRequest.Result.Success)
+            if (_worldsUseOnChain && task.Status == TaskStatus.RanToCompletion && task.Result.status == 412)
             {
-                if (_worldsUseOnChain && req.responseCode == 412)
-                {
-                    AppendLog("Worlds: on-chain discovery not configured (missing RPC URL or program id).");
-                }
-                else
-                {
-                    AppendLog("Worlds: failed to load list.");
-                }
-                yield break;
+                AppendLog("Worlds: on-chain discovery not configured (missing RPC URL or program id).");
             }
-
-            var wrapped = "{\"items\":" + req.downloadHandler.text + "}";
-            var list = JsonUtility.FromJson<WorldListResponse>(wrapped);
-            if (list == null || list.items == null)
+            else
             {
-                AppendLog("Worlds: list parse failed.");
-                yield break;
+                AppendLog("Worlds: failed to load list.");
             }
-
-            RenderWorldList(list.items);
+            yield break;
         }
+
+        var wrapped = "{\"items\":" + task.Result.text + "}";
+        var list = JsonUtility.FromJson<WorldListResponse>(wrapped);
+        if (list == null || list.items == null)
+        {
+            AppendLog("Worlds: list parse failed.");
+            yield break;
+        }
+
+        RenderWorldList(list.items);
     }
 
     private void RenderWorldList(WorldDirectoryEntry[] worlds)
@@ -368,33 +348,25 @@ public class OwpBootstrap : MonoBehaviour
     private IEnumerator CreateWorld(string name)
     {
         var json = $"{{\"name\":{JsonEscape(name)},\"game_port\":7777}}";
-        var body = Encoding.UTF8.GetBytes(json);
+        var task = HttpRequestAsync("POST", $"{AdminBaseUrl}/worlds", json, 20);
+        yield return new WaitUntil(() => task.IsCompleted);
 
-        using (var req = new UnityWebRequest($"{AdminBaseUrl}/worlds", "POST"))
+        if (task.Status != TaskStatus.RanToCompletion || !task.Result.ok)
         {
-            req.uploadHandler = new UploadHandlerRaw(body);
-            req.downloadHandler = new DownloadHandlerBuffer();
-            req.SetRequestHeader("Content-Type", "application/json");
-            req.timeout = 20;
-            yield return req.SendWebRequest();
-
-            if (req.result != UnityWebRequest.Result.Success)
-            {
-                AppendLog("Worlds: create failed.");
-                yield break;
-            }
-
-            var manifest = JsonUtility.FromJson<WorldManifest>(req.downloadHandler.text);
-            if (manifest == null || string.IsNullOrEmpty(manifest.world_id))
-            {
-                AppendLog("Worlds: create response parse failed.");
-                yield break;
-            }
-
-            AppendLog($"Worlds: created {manifest.name} ({manifest.world_id}).");
-            SelectWorld(manifest.world_id, manifest.ports != null ? manifest.ports.game_port : 7777, manifest.name);
-            yield return StartCoroutine(RefreshWorlds());
+            AppendLog("Worlds: create failed.");
+            yield break;
         }
+
+        var manifest = JsonUtility.FromJson<WorldManifest>(task.Result.text);
+        if (manifest == null || string.IsNullOrEmpty(manifest.world_id))
+        {
+            AppendLog("Worlds: create response parse failed.");
+            yield break;
+        }
+
+        AppendLog($"Worlds: created {manifest.name} ({manifest.world_id}).");
+        SelectWorld(manifest.world_id, manifest.ports != null ? manifest.ports.game_port : 7777, manifest.name);
+        yield return StartCoroutine(RefreshWorlds());
     }
 
     private IEnumerator HostAndConnectSelectedWorld()
@@ -488,6 +460,42 @@ public class OwpBootstrap : MonoBehaviour
         catch
         {
             return false;
+        }
+    }
+
+    private static async Task<HttpResult> HttpRequestAsync(
+        string method,
+        string url,
+        string jsonBody,
+        int timeoutSeconds
+    )
+    {
+        try
+        {
+            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds)))
+            using (var req = new HttpRequestMessage(new HttpMethod(method), url))
+            {
+                if (!string.IsNullOrEmpty(jsonBody))
+                {
+                    req.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+                }
+
+                using (var resp = await Http.SendAsync(req, cts.Token))
+                {
+                    var text = resp.Content != null ? await resp.Content.ReadAsStringAsync() : "";
+                    var code = (long)resp.StatusCode;
+                    return new HttpResult
+                    {
+                        ok = code >= 200 && code < 300,
+                        status = code,
+                        text = text
+                    };
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return new HttpResult { ok = false, status = 0, text = ex.Message };
         }
     }
 
@@ -1080,6 +1088,13 @@ public class OwpBootstrap : MonoBehaviour
         public bool ok;
         public string motd;
         public string error;
+    }
+
+    private struct HttpResult
+    {
+        public bool ok;
+        public long status;
+        public string text;
     }
 
     [Serializable]
