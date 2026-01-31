@@ -44,6 +44,7 @@ public class OwpBootstrap : MonoBehaviour
 	    private static readonly string[] ClaudeModelOptions = { "default", "haiku", "sonnet", "opus" };
 
     private Process _serverProcess;
+    private GameObject _avatarSceneRoot;
     private GameObject _avatarRoot;
     private Transform _avatarBody;
     private Transform _avatarHead;
@@ -71,6 +72,7 @@ public class OwpBootstrap : MonoBehaviour
 
     private Canvas _canvas;
     private Button _orbButton;
+    private Button _worldsToggleButton;
     private GameObject _chatPanel;
     private Button _providerButton;
     private Text _providerButtonLabel;
@@ -130,8 +132,9 @@ public class OwpBootstrap : MonoBehaviour
         InstallEditorHooks();
 #endif
         EnsureSceneBasics();
-        CreatePlaceholderAvatar();
         LoadStarterPackResources();
+        CreatePlaceholderAvatar();
+        EnsureAvatarShowcaseScene();
         CreateUi();
 
         StartCoroutine(BootSequence());
@@ -1988,6 +1991,106 @@ public class OwpBootstrap : MonoBehaviour
         }
     }
 
+    private void EnsureAvatarShowcaseScene()
+    {
+        if (_avatarSceneRoot != null) return;
+
+        EnsureStarterMeshes();
+
+        _avatarSceneRoot = new GameObject("OWP_AvatarShowcase");
+        DontDestroyOnLoad(_avatarSceneRoot);
+
+        // Platform
+        var platform = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        platform.name = "Platform";
+        platform.transform.SetParent(_avatarSceneRoot.transform, false);
+        platform.transform.position = new Vector3(0f, -0.05f, 0f);
+        platform.transform.localScale = new Vector3(8f, 0.1f, 8f);
+        RemoveCollider(platform);
+
+        var platformMat = new Material(Shader.Find("Standard"));
+        platformMat.color = new Color(0.06f, 0.08f, 0.12f, 1f);
+        platformMat.SetFloat("_Glossiness", 0.15f);
+        if (_starterTexCircuit != null)
+        {
+            platformMat.mainTexture = _starterTexCircuit;
+            platformMat.mainTextureScale = new Vector2(4f, 4f);
+        }
+        platformMat.EnableKeyword("_EMISSION");
+        platformMat.SetColor("_EmissionColor", new Color(0f, 0.45f, 0.9f, 1f) * 0.35f);
+        var pr = platform.GetComponent<Renderer>();
+        if (pr != null) pr.material = platformMat;
+
+        // Back wall
+        var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        wall.name = "Backdrop";
+        wall.transform.SetParent(_avatarSceneRoot.transform, false);
+        wall.transform.position = new Vector3(0f, 2.2f, 6.0f);
+        wall.transform.localScale = new Vector3(12f, 5f, 0.2f);
+        RemoveCollider(wall);
+        var wr = wall.GetComponent<Renderer>();
+        if (wr != null)
+        {
+            var mat = new Material(Shader.Find("Standard"));
+            mat.color = new Color(0.03f, 0.05f, 0.09f, 1f);
+            mat.SetFloat("_Glossiness", 0.05f);
+            if (_starterTexStripes != null)
+            {
+                mat.mainTexture = _starterTexStripes;
+                mat.mainTextureScale = new Vector2(6f, 2f);
+            }
+            wr.material = mat;
+        }
+
+        // Hologram ring
+        var ring = new GameObject("HoloRing");
+        ring.transform.SetParent(_avatarSceneRoot.transform, false);
+        ring.transform.position = new Vector3(0f, 0.02f, 0f);
+        ring.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+        ring.transform.localScale = new Vector3(2.8f, 2.8f, 0.22f);
+        var ringMf = ring.AddComponent<MeshFilter>();
+        ringMf.sharedMesh = _meshTorus;
+        var ringMr = ring.AddComponent<MeshRenderer>();
+        var ringMat = new Material(Shader.Find("Standard"));
+        ringMat.color = new Color(0.02f, 0.03f, 0.05f, 1f);
+        ringMat.EnableKeyword("_EMISSION");
+        ringMat.SetColor("_EmissionColor", new Color(0.35f, 0.95f, 0.85f, 1f) * 2.0f);
+        ringMr.material = ringMat;
+
+        // Accent pylons
+        for (int i = 0; i < 4; i++)
+        {
+            float a = i * Mathf.PI * 0.5f;
+            var p = new GameObject($"Pylon_{i}");
+            p.transform.SetParent(_avatarSceneRoot.transform, false);
+            p.transform.position = new Vector3(Mathf.Cos(a) * 3.6f, 1.2f, Mathf.Sin(a) * 3.6f);
+            p.transform.rotation = Quaternion.Euler(0f, -i * 90f, 0f);
+
+            var body = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            body.name = "Body";
+            body.transform.SetParent(p.transform, false);
+            body.transform.localPosition = Vector3.zero;
+            body.transform.localScale = new Vector3(0.35f, 2.2f, 0.35f);
+            RemoveCollider(body);
+            var br = body.GetComponent<Renderer>();
+            if (br != null) br.material = platformMat;
+
+            var cap = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            cap.name = "Cap";
+            cap.transform.SetParent(p.transform, false);
+            cap.transform.localPosition = new Vector3(0f, 1.2f, 0f);
+            cap.transform.localScale = new Vector3(0.4f, 0.4f, 0.4f);
+            RemoveCollider(cap);
+
+            var capMat = new Material(Shader.Find("Standard"));
+            capMat.color = new Color(0.02f, 0.03f, 0.05f, 1f);
+            capMat.EnableKeyword("_EMISSION");
+            capMat.SetColor("_EmissionColor", new Color(0.6f, 0.25f, 1.0f, 1f) * 1.8f);
+            var cr = cap.GetComponent<Renderer>();
+            if (cr != null) cr.material = capMat;
+        }
+    }
+
     private void ApplyWorldPlan(WorldPlan plan)
     {
         if (plan == null || plan.ground == null || plan.sky == null || plan.fog == null)
@@ -2525,6 +2628,13 @@ public class OwpBootstrap : MonoBehaviour
             _chatPanel.SetActive(!_chatPanel.activeSelf);
         });
 
+        // Worlds toggle (top-left)
+        _worldsToggleButton = CreateSciFiCornerOrbButton(canvasGo.transform, "WorldsToggle", "☰", new Vector2(0, 1), new Vector2(34, -34), new Vector2(44, 44));
+        _worldsToggleButton.onClick.AddListener(() =>
+        {
+            _worldsPanel.SetActive(!_worldsPanel.activeSelf);
+        });
+
         // Provider panel (center)
         _providerPanel = CreateSciFiPanel(canvasGo.transform, "ProviderPanel", new Color(0.02f, 0.04f, 0.1f, 0.96f), new Color(0f, 0.8f, 1f, 0.6f));
         var prt = _providerPanel.GetComponent<RectTransform>();
@@ -2585,6 +2695,10 @@ public class OwpBootstrap : MonoBehaviour
 	        _providerPanel.SetActive(false);
 
         SetWorldsSource(false);
+
+        // Default closed: user toggles panels via the corner buttons.
+        _worldsPanel.SetActive(false);
+        _chatPanel.SetActive(false);
     }
 
     private static GameObject CreatePanel(Transform parent, string name, Color bg)
@@ -3197,6 +3311,43 @@ public class OwpBootstrap : MonoBehaviour
         text.fontSize = 32;
         text.alignment = TextAnchor.MiddleCenter;
         text.color = new Color(1f, 1f, 1f, 1f);
+        text.fontStyle = FontStyle.Bold;
+
+        var trt = text.GetComponent<RectTransform>();
+        trt.anchorMin = Vector2.zero;
+        trt.anchorMax = Vector2.one;
+        trt.offsetMin = Vector2.zero;
+        trt.offsetMax = Vector2.zero;
+
+        return btn;
+    }
+
+    private static Button CreateSciFiCornerOrbButton(Transform parent, string name, string label, Vector2 anchor, Vector2 anchoredPos, Vector2 size)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+
+        var rt = go.AddComponent<RectTransform>();
+        rt.anchorMin = anchor;
+        rt.anchorMax = anchor;
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = anchoredPos;
+        rt.sizeDelta = size;
+
+        var bg = go.AddComponent<Image>();
+        bg.color = new Color(0f, 0.75f, 1f, 0.35f);
+
+        var btn = go.AddComponent<Button>();
+
+        var textObj = new GameObject($"{name}_Text");
+        textObj.transform.SetParent(go.transform, false);
+
+        var text = textObj.AddComponent<Text>();
+        text.font = GetDefaultFont();
+        text.text = label;
+        text.fontSize = 28;
+        text.alignment = TextAnchor.MiddleCenter;
+        text.color = new Color(0.85f, 1f, 1f, 1f);
         text.fontStyle = FontStyle.Bold;
 
         var trt = text.GetComponent<RectTransform>();
